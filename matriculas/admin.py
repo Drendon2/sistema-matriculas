@@ -87,6 +87,22 @@ class PeriodoAdmin(admin.ModelAdmin):
     # hace el cambio en una transacción. Editarlos a mano aquí solo serviría para
     # chocar contra la restricción de "un solo periodo en curso".
     readonly_fields = ("activo", "matriculas_abiertas")
-admin.site.register(EncuestaDemografica)
+@admin.register(EncuestaDemografica)
+class EncuestaDemograficaAdmin(admin.ModelAdmin):
+    """Ahora que la encuesta son listas cerradas, se puede filtrar por ellas.
+
+    Los campos SENSIBLES (grupo étnico, discapacidad, condición de víctima) se
+    dejan a propósito fuera de `list_display` y `list_filter`: siguen visibles
+    al abrir una encuesta concreta, que es donde hace falta consultarlos, pero
+    no se exponen en una tabla que se recorre de un vistazo ni sirven para
+    segmentar personas desde el listado. Ver el recordatorio de visibilidad en
+    models.py.
+    """
+
+    list_display = ("perfil", "genero", "estrato", "nivel_educativo", "ocupacion", "zona")
+    list_filter = ("genero", "estrato", "nivel_educativo", "ocupacion", "zona", "afiliacion_salud")
+    search_fields = ("perfil__nombre_completo", "barrio")
+
+
 admin.site.register(Acudiente)
 admin.site.register(DatosEstudiante)

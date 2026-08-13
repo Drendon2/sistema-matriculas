@@ -264,13 +264,33 @@ def _con_porcentaje(filas, campo="total"):
     return filas
 
 
-def _top5_texto_libre(encuesta_qs, campo):
-    """Los 5 valores más repetidos de un campo de texto libre de la encuesta (excluye vacíos)."""
-    filas = [
-        {"etiqueta": fila[campo], "total": fila["total"]}
-        for fila in encuesta_qs.exclude(**{campo: ""}).values(campo).annotate(total=Count("id")).order_by("-total")[:5]
-    ]
-    return _con_porcentaje(filas)
+def _stats_choices(encuesta_qs, campo, choices):
+    """Conteo de un campo de la encuesta por cada opción declarada.
+
+    Sustituye al viejo "top 5 de texto libre", que existía solo porque estos
+    campos se escribían a mano: había que recortar a cinco porque la lista de
+    valores distintos no tenía fin, y aun así «Bachillerato» y «bachiller»
+    salían como dos filas. Con listas cerradas se pueden mostrar todas las
+    opciones y la suma cuadra.
+
+    Respeta el orden en que están declaradas las choices en vez de ordenar por
+    frecuencia: son escalas con un orden propio (de menos a más estudios, del
+    estrato 1 al 6) y reordenarlas por popularidad haría ilegible la
+    comparación entre un periodo y otro.
+
+    Las opciones sin respuestas salen en cero en lugar de desaparecer, para que
+    el panel enseñe siempre la misma lista y se vea qué NO contesta la gente.
+    Los vacíos (campos opcionales sin responder) no cuentan como opción: no son
+    una respuesta, y se deducen de la diferencia con el total de encuestas.
+    """
+    conteos = {
+        fila[campo]: fila["total"]
+        for fila in encuesta_qs.values(campo).annotate(total=Count("id"))
+    }
+    return _con_porcentaje([
+        {"etiqueta": etiqueta, "total": conteos.get(codigo, 0)}
+        for codigo, etiqueta in choices
+    ])
 
 
 @requiere_rol("administrador")
@@ -329,16 +349,15 @@ def estadisticas(request):
     encuesta_qs = EncuestaDemografica.objects.all()
     total_encuestas = encuesta_qs.count()
 
-    genero_labels = dict(EncuestaDemografica.GENEROS)
-    genero_stats = _con_porcentaje([
-        {"etiqueta": genero_labels.get(fila["genero"], fila["genero"]), "total": fila["total"]}
-        for fila in encuesta_qs.values("genero").annotate(total=Count("id")).order_by("-total")
-    ])
-
-    estrato_stats = _con_porcentaje([
-        {"etiqueta": f"Estrato {fila['estrato']}", "total": fila["total"]}
-        for fila in encuesta_qs.values("estrato").annotate(total=Count("id")).order_by("estrato")
-    ])
+    # Todas las escalas de la encuesta pasan por el mismo helper para que el
+    # panel entero se lea igual. Género pierde con esto su orden por frecuencia
+    # y pasa al de la lista, como el resto: dentro de un mismo panel, dos
+    # criterios de orden distintos solo invitan a leer mal una gráfica.
+    genero_stats = _stats_choices(encuesta_qs, "genero", EncuestaDemografica.GENEROS)
+    estrato_stats = _stats_choices(
+        encuesta_qs, "estrato",
+        [(valor, f"Estrato {etiqueta}") for valor, etiqueta in EncuestaDemografica.ESTRATOS],
+    )
 
     autoriza_si = encuesta_qs.filter(autoriza_tratamiento_datos=True).count()
     autoriza_no = total_encuestas - autoriza_si
@@ -359,10 +378,20 @@ def estadisticas(request):
         "autoriza_no": autoriza_no,
         "pct_autoriza_si": pct_autoriza_si,
         "pct_autoriza_no": 100 - pct_autoriza_si,
-        "nivel_educativo_top": _top5_texto_libre(encuesta_qs, "nivel_educativo"),
-        "ocupacion_top": _top5_texto_libre(encuesta_qs, "ocupacion"),
-        "grupo_etnico_top": _top5_texto_libre(encuesta_qs, "grupo_etnico"),
-        "discapacidad_top": _top5_texto_libre(encuesta_qs, "discapacidad"),
+        "nivel_educativo_stats": _stats_choices(
+            encuesta_qs, "nivel_educativo", EncuestaDemografica.NIVELES_EDUCATIVOS),
+        "ocupacion_stats": _stats_choices(
+            encuesta_qs, "ocupacion", EncuestaDemografica.OCUPACIONES),
+        "zona_stats": _stats_choices(
+            encuesta_qs, "zona", EncuestaDemografica.ZONAS),
+        "afiliacion_salud_stats": _stats_choices(
+            encuesta_qs, "afiliacion_salud", EncuestaDemografica.AFILIACIONES_SALUD),
+        "grupo_etnico_stats": _stats_choices(
+            encuesta_qs, "grupo_etnico", EncuestaDemografica.GRUPOS_ETNICOS),
+        "discapacidad_stats": _stats_choices(
+            encuesta_qs, "discapacidad", EncuestaDemografica.DISCAPACIDADES),
+        "victima_conflicto_stats": _stats_choices(
+            encuesta_qs, "victima_conflicto_armado", EncuestaDemografica.VICTIMAS_CONFLICTO),
     })
 
 

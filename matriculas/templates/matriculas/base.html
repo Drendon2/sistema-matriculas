@@ -293,10 +293,10 @@
   .dash-split-leyenda { display: flex; gap: 1.25rem; font-size: 0.78rem; color: var(--ink-soft); }
   .dash-split-leyenda .punto { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.35rem; vertical-align: middle; }
 
-  .dash-top-lista { list-style: none; padding: 0; margin: 0; }
-  .dash-top-lista li { display: flex; justify-content: space-between; gap: 0.75rem; padding: 0.45rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
-  .dash-top-lista li:last-child { border-bottom: none; }
-  .dash-top-lista .dash-top-num { font-family: var(--font-mono); color: var(--ink-soft); font-weight: 700; flex-shrink: 0; }
+  /* Aclaración al lado de un h4 ("opcional", "dato sensible"): tiene que
+     escapar del versalitas del h4 para que se lea como nota y no como parte
+     del título. Antes iba repetida como estilo en línea en cada h4. */
+  .h4-nota { font-weight: 400; text-transform: none; letter-spacing: normal; }
 
   .dash-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
 

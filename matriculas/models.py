@@ -376,8 +376,24 @@ class Perfil(models.Model):
 
 
 class EncuestaDemografica(models.Model):
-    """Obligatoria para todos los usuarios. Los campos SENSIBLES quedan opcionales."""
+    """Obligatoria para todos los usuarios. Los campos SENSIBLES quedan opcionales.
 
+    Salvo `barrio`, todo se responde eligiendo de una lista cerrada. Son dos
+    cosas a la vez: la persona escribe menos —muchas la llenan desde el
+    celular— y las cifras de Gestión → Estadísticas se pueden agrupar de
+    verdad. Con texto libre, «Bachillerato», «bachiller» y «Secundaria» eran
+    tres filas distintas de lo mismo, y no había forma de sumarlas.
+
+    `barrio` sigue siendo texto libre a propósito: una lista fija de barrios y
+    veredas ataría el proyecto a un municipio concreto, y la idea es poder
+    reinstalarlo en otra institución sin tocar código (ver
+    `ConfiguracionInstitucion`).
+    """
+
+    # Códigos internos cortos y estables; el texto legible va en el segundo
+    # elemento. Lo que se guarda en la base es el código, así que renombrar una
+    # etiqueta no obliga a migrar datos. "ns" significa siempre "prefiero no
+    # responder", el mismo código en todas las escalas que lo ofrecen.
     GENEROS = [
         ("f", "Femenino"),
         ("m", "Masculino"),
@@ -386,16 +402,100 @@ class EncuestaDemografica(models.Model):
     ]
     ESTRATOS = [(i, str(i)) for i in range(1, 7)]
 
+    # De menos a más estudios: el orden de la lista es el que usan los
+    # desplegables y las gráficas, así que tiene que ser el orden natural de la
+    # escala y no uno alfabético.
+    NIVELES_EDUCATIVOS = [
+        ("ninguno", "Ninguno"),
+        ("primaria_inc", "Primaria incompleta"),
+        ("primaria_com", "Primaria completa"),
+        ("secundaria_inc", "Secundaria incompleta"),
+        ("secundaria_com", "Secundaria completa"),
+        ("tecnico", "Técnico"),
+        ("tecnologo", "Tecnólogo"),
+        ("universitario", "Universitario"),
+        ("posgrado", "Posgrado"),
+    ]
+
+    OCUPACIONES = [
+        ("estudiante", "Estudiante"),
+        ("empleado", "Empleado"),
+        ("independiente", "Independiente"),
+        ("desempleado", "Desempleado"),
+        ("hogar", "Hogar"),
+        ("pensionado", "Pensionado"),
+        ("otro", "Otro"),
+    ]
+
+    GRUPOS_ETNICOS = [
+        ("ninguno", "Ninguno"),
+        ("indigena", "Indígena"),
+        ("afro", "Negro/Afrocolombiano"),
+        ("raizal", "Raizal"),
+        ("palenquero", "Palenquero"),
+        ("rrom", "Rrom/Gitano"),
+        ("ns", "Prefiero no responder"),
+    ]
+
+    DISCAPACIDADES = [
+        ("ninguna", "Ninguna"),
+        ("fisica", "Física/motora"),
+        ("visual", "Visual"),
+        ("auditiva", "Auditiva"),
+        ("intelectual", "Intelectual/cognitiva"),
+        ("psicosocial", "Psicosocial"),
+        ("multiple", "Múltiple"),
+        ("ns", "Prefiero no responder"),
+    ]
+
+    ZONAS = [
+        ("urbana", "Urbana"),
+        ("rural", "Rural"),
+        ("centro_poblado", "Centro poblado"),
+    ]
+
+    VICTIMAS_CONFLICTO = [
+        ("si", "Sí"),
+        ("no", "No"),
+        ("ns", "Prefiero no responder"),
+    ]
+
+    AFILIACIONES_SALUD = [
+        ("contributivo", "Contributivo"),
+        ("subsidiado", "Subsidiado"),
+        ("no_afiliado", "No afiliado"),
+        ("no_sabe", "No sabe"),
+    ]
+
     perfil = models.OneToOneField(Perfil, on_delete=models.CASCADE, related_name="encuesta")
     genero = models.CharField(max_length=2, choices=GENEROS, verbose_name="género")
     barrio = models.CharField(max_length=60)
     estrato = models.PositiveSmallIntegerField(choices=ESTRATOS)
-    nivel_educativo = models.CharField(max_length=40, verbose_name="nivel educativo")
-    ocupacion = models.CharField(max_length=40, verbose_name="ocupación")
+    nivel_educativo = models.CharField(
+        max_length=20, choices=NIVELES_EDUCATIVOS, verbose_name="nivel educativo",
+    )
+    ocupacion = models.CharField(max_length=20, choices=OCUPACIONES, verbose_name="ocupación")
+
+    # Opcionales, pero no por sensibles: son datos que mucha gente sencillamente
+    # no sabe de sí misma en el momento de inscribirse (sobre todo el régimen de
+    # salud), y obligar a contestarlos solo produciría respuestas inventadas.
+    zona = models.CharField(max_length=20, choices=ZONAS, blank=True)
+    afiliacion_salud = models.CharField(
+        max_length=20, choices=AFILIACIONES_SALUD, blank=True,
+        verbose_name="afiliación a salud",
+    )
 
     # Datos sensibles (Ley 1581): opcionales aunque la encuesta sea obligatoria.
-    grupo_etnico = models.CharField(max_length=40, blank=True, verbose_name="grupo étnico")
-    discapacidad = models.CharField(max_length=80, blank=True)
+    # La condición de víctima va aquí y no arriba porque, además de sensible por
+    # el mismo criterio, tiene deber de reserva propio (Ley 1448).
+    grupo_etnico = models.CharField(
+        max_length=20, choices=GRUPOS_ETNICOS, blank=True, verbose_name="grupo étnico",
+    )
+    discapacidad = models.CharField(max_length=20, choices=DISCAPACIDADES, blank=True)
+    victima_conflicto_armado = models.CharField(
+        max_length=20, choices=VICTIMAS_CONFLICTO, blank=True,
+        verbose_name="víctima del conflicto armado",
+    )
 
     # Autorización de tratamiento de datos (para menores la otorga el acudiente).
     autoriza_tratamiento_datos = models.BooleanField(default=False, verbose_name="autoriza tratamiento de datos")

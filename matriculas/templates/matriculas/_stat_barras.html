@@ -1,0 +1,22 @@
+{% comment %}
+Una tanda de barras horizontales del panel de estadísticas.
+
+Contexto:
+  filas ... lista de {etiqueta, total, porcentaje}, tal como la devuelven
+            `_con_porcentaje` y `_stats_choices` en views_gestion.py.
+
+El mismo bloque se repetía en cada escala de la encuesta. Se extrae aquí para
+que agregar una pregunta nueva al panel sea una línea y no un copiar-pegar de
+cuatro etiquetas que hay que acordarse de renombrar.
+{% endcomment %}
+{% for fila in filas %}
+<div class="stat-bar-fila">
+  <span class="stat-bar-etiqueta">{{ fila.etiqueta }}</span>
+  <div class="stat-bar-pista">
+    <div class="stat-bar-relleno" style="width: {{ fila.porcentaje }}%;"></div>
+  </div>
+  <span class="stat-bar-num">{{ fila.total }}</span>
+</div>
+{% empty %}
+<p class="vacio">Sin respuestas todavía.</p>
+{% endfor %}

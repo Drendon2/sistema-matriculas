@@ -44,10 +44,19 @@
   <tr><th>Género</th><td>{{ encuesta.get_genero_display }}</td></tr>
   <tr><th>Barrio</th><td>{{ encuesta.barrio }}</td></tr>
   <tr><th>Estrato</th><td>{{ encuesta.estrato }}</td></tr>
-  <tr><th>Nivel educativo</th><td>{{ encuesta.nivel_educativo }}</td></tr>
-  <tr><th>Ocupación</th><td>{{ encuesta.ocupacion }}</td></tr>
-  <tr><th>Grupo étnico</th><td>{{ encuesta.grupo_etnico|default:"—" }}</td></tr>
-  <tr><th>Discapacidad</th><td>{{ encuesta.discapacidad|default:"—" }}</td></tr>
+  {# get_FOO_display traduce el código guardado a su texto legible; sin esto la
+     ficha mostraría "secundaria_com" en vez de "Secundaria completa". El
+     default cubre los campos opcionales sin responder, donde devuelve "". #}
+  <tr><th>Nivel educativo</th><td>{{ encuesta.get_nivel_educativo_display|default:"—" }}</td></tr>
+  <tr><th>Ocupación</th><td>{{ encuesta.get_ocupacion_display|default:"—" }}</td></tr>
+  <tr><th>Zona</th><td>{{ encuesta.get_zona_display|default:"—" }}</td></tr>
+  <tr><th>Afiliación a salud</th><td>{{ encuesta.get_afiliacion_salud_display|default:"—" }}</td></tr>
+  <tr><th>Grupo étnico</th><td>{{ encuesta.get_grupo_etnico_display|default:"—" }}</td></tr>
+  <tr><th>Discapacidad</th><td>{{ encuesta.get_discapacidad_display|default:"—" }}</td></tr>
+  <tr>
+    <th>Víctima del conflicto armado</th>
+    <td>{{ encuesta.get_victima_conflicto_armado_display|default:"—" }}</td>
+  </tr>
   <tr>
     <th>Autoriza tratamiento de datos</th>
     <td>

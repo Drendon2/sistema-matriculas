@@ -20,8 +20,9 @@ from django.urls import reverse
 
 from .models import (
     RANURA_MAXIMA_ABSOLUTA,
-    Area, ConfiguracionInstitucion, DatosEstudiante, Grupo, Matricula, Perfil,
-    Periodo, Promotoria, historial_por_periodo, resumen_trayectoria,
+    Area, ConfiguracionInstitucion, DatosEstudiante, EncuestaDemografica, Grupo,
+    Matricula, Perfil, Periodo, Promotoria, historial_por_periodo,
+    resumen_trayectoria,
 )
 from .views_gestion import ROL_PENDIENTE
 
@@ -591,3 +592,156 @@ class FiltrosUsuariosTests(TestCase):
         respuesta = self.client.get(reverse("usuario_lista"))
 
         self.assertNotEqual(respuesta.status_code, 200)
+
+
+class EncuestaChoicesTests(TestCase):
+    """La encuesta demográfica como listas cerradas en vez de texto libre.
+
+    El cambio persigue dos cosas: que la persona escriba menos, y que las
+    cifras de Gestión → Estadísticas se puedan agrupar. Con texto libre,
+    «Bachillerato» y «bachiller» eran dos filas distintas de lo mismo.
+
+    `barrio` se queda como texto libre a propósito y hay una prueba que lo
+    fija: convertirlo en una lista de barrios ataría el proyecto a un
+    municipio concreto.
+    """
+
+    # Respuestas mínimas válidas: los obligatorios de la encuesta.
+    BASE = {
+        "accion": "encuesta",
+        "genero": "f",
+        "barrio": "La Playa",
+        "estrato": 2,
+        "nivel_educativo": "secundaria_com",
+        "ocupacion": "independiente",
+    }
+
+    def setUp(self):
+        usuario = User.objects.create_user(username="marta", password="x")
+        self.perfil = Perfil.objects.create(
+            usuario=usuario, rol="profesor", nombre_completo="Marta Docente",
+            # Mayor de edad: a los menores el formulario les quita la casilla de
+            # autorización, que la otorga el acudiente.
+            fecha_nacimiento=date(1990, 4, 2), telefono="3000000000",
+        )
+        self.client.force_login(usuario)
+
+    def responder(self, **extra):
+        datos = dict(self.BASE, **extra)
+        return self.client.post(reverse("mi_perfil"), datos)
+
+    # -- el formulario ------------------------------------------------------
+
+    def test_los_campos_salen_como_desplegables(self):
+        """Lo que pide el encargo: que no haya que escribir, sino elegir."""
+        respuesta = self.client.get(reverse("mi_perfil"))
+
+        for campo in (
+            "nivel_educativo", "ocupacion", "grupo_etnico", "discapacidad",
+            "zona", "victima_conflicto_armado", "afiliacion_salud",
+        ):
+            self.assertContains(respuesta, f'<select name="{campo}"', html=False)
+
+    def test_el_barrio_sigue_siendo_texto_libre(self):
+        """Una lista fija de barrios ataría el sistema a un municipio."""
+        formulario = self.client.get(reverse("mi_perfil")).context["encuesta_form"]
+
+        self.assertEqual(formulario.fields["barrio"].widget.input_type, "text")
+
+    # -- guardado -----------------------------------------------------------
+
+    def test_guarda_los_campos_convertidos_y_los_nuevos(self):
+        respuesta = self.responder(
+            grupo_etnico="afro",
+            discapacidad="ninguna",
+            zona="rural",
+            victima_conflicto_armado="no",
+            afiliacion_salud="subsidiado",
+            autoriza_tratamiento_datos="on",
+        )
+
+        self.assertEqual(respuesta.status_code, 302)
+        encuesta = EncuestaDemografica.objects.get(perfil=self.perfil)
+        self.assertEqual(encuesta.nivel_educativo, "secundaria_com")
+        self.assertEqual(encuesta.ocupacion, "independiente")
+        self.assertEqual(encuesta.grupo_etnico, "afro")
+        self.assertEqual(encuesta.zona, "rural")
+        self.assertEqual(encuesta.victima_conflicto_armado, "no")
+        self.assertEqual(encuesta.afiliacion_salud, "subsidiado")
+        self.assertEqual(encuesta.barrio, "La Playa")
+
+    def test_los_opcionales_se_pueden_dejar_en_blanco(self):
+        respuesta = self.responder()
+
+        self.assertEqual(respuesta.status_code, 302)
+        encuesta = EncuestaDemografica.objects.get(perfil=self.perfil)
+        self.assertEqual(encuesta.zona, "")
+        self.assertEqual(encuesta.victima_conflicto_armado, "")
+        self.assertEqual(encuesta.grupo_etnico, "")
+
+    def test_los_obligatorios_siguen_siendo_obligatorios(self):
+        respuesta = self.responder(nivel_educativo="")
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertFalse(EncuestaDemografica.objects.filter(perfil=self.perfil).exists())
+
+    def test_rechaza_un_valor_que_no_esta_en_la_lista(self):
+        """Es la mitad del asunto: sin esto volveríamos a tener texto libre."""
+        respuesta = self.responder(ocupacion="Asesor de proyectos")
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertFalse(EncuestaDemografica.objects.filter(perfil=self.perfil).exists())
+
+    def test_se_guarda_el_codigo_y_se_lee_la_etiqueta(self):
+        self.responder(zona="centro_poblado")
+
+        encuesta = EncuestaDemografica.objects.get(perfil=self.perfil)
+        self.assertEqual(encuesta.zona, "centro_poblado")
+        self.assertEqual(encuesta.get_zona_display(), "Centro poblado")
+        self.assertEqual(encuesta.get_nivel_educativo_display(), "Secundaria completa")
+
+    # -- lo que lee esos campos ---------------------------------------------
+
+    def test_las_estadisticas_agrupan_por_opcion(self):
+        """Antes esto era un "top 5" de texto libre; ahora la lista es finita."""
+        self.responder(zona="rural")
+        admin_usuario = User.objects.create_user(username="admin1", password="x")
+        Perfil.objects.create(
+            usuario=admin_usuario, rol="administrador", nombre_completo="Admin",
+            fecha_nacimiento=date(1980, 1, 1), telefono="3000000001",
+        )
+        self.client.force_login(admin_usuario)
+
+        respuesta = self.client.get(reverse("gestion_estadisticas"))
+
+        self.assertEqual(respuesta.status_code, 200)
+        zona = {f["etiqueta"]: f["total"] for f in respuesta.context["zona_stats"]}
+        # Todas las opciones aparecen, incluidas las que nadie eligió: así el
+        # panel enseña siempre la misma lista y se ve qué NO contesta la gente.
+        self.assertEqual(zona, {"Urbana": 0, "Rural": 1, "Centro poblado": 0})
+        niveles = {f["etiqueta"]: f["total"] for f in respuesta.context["nivel_educativo_stats"]}
+        self.assertEqual(niveles["Secundaria completa"], 1)
+
+    def test_la_ficha_del_estudiante_muestra_las_etiquetas_legibles(self):
+        estudiante_usuario = User.objects.create_user(username="samu", password="x")
+        estudiante = Perfil.objects.create(
+            usuario=estudiante_usuario, rol="estudiante", nombre_completo="Samuel",
+            fecha_nacimiento=date(2000, 1, 1), telefono="3000000002",
+        )
+        EncuestaDemografica.objects.create(
+            perfil=estudiante, genero="m", barrio="Centro", estrato=1,
+            nivel_educativo="tecnologo", ocupacion="hogar", zona="urbana",
+        )
+        admin_usuario = User.objects.create_user(username="admin2", password="x")
+        Perfil.objects.create(
+            usuario=admin_usuario, rol="administrador", nombre_completo="Admin",
+            fecha_nacimiento=date(1980, 1, 1), telefono="3000000003",
+        )
+        self.client.force_login(admin_usuario)
+
+        respuesta = self.client.get(reverse("detalle_estudiante", args=[estudiante.id]))
+
+        self.assertContains(respuesta, "Tecnólogo")
+        self.assertContains(respuesta, "Urbana")
+        # El código interno no se le enseña a nadie.
+        self.assertNotContains(respuesta, "tecnologo")
