@@ -666,12 +666,133 @@ def grupo_estudiantes(request, grupo_id):
 # Usuarios (User + Perfil + DatosEstudiante/Acudiente si aplica)
 # ---------------------------------------------------------------------------
 
+# Valor del filtro de rol que pide justamente a los que NO tienen rol. Hace
+# falta un centinela porque el "sin rol" real es la cadena vacía, y esa ya
+# significa "no filtres por rol" en un formulario GET.
+ROL_PENDIENTE = "__sin__"
+
+
 class UsuarioListView(RolGestionRequiredMixin, ListView):
+    """Listado de usuarios, filtrable por rol y por dónde está la persona.
+
+    Los tres filtros de catálogo (departamento, promotoría, grupo) no se
+    resuelven igual para todos los roles, porque la gente se relaciona con una
+    promotoría de dos maneras distintas: el estudiante porque está matriculado
+    en ella, el profesor porque la dicta. Filtrar por «Violín» devuelve las dos
+    cosas —los matriculados y su profesor—, que es lo que uno espera al pedir
+    «la gente de Violín». El filtro de grupo es la excepción: un grupo solo
+    tiene estudiantes, así que ahí el profesor no aparece.
+
+    Director y administrador no cuelgan de ninguna promotoría, así que
+    cualquier filtro de catálogo los deja fuera. Es correcto, no un fallo: si
+    alguien cruza rol=administrador con una promotoría, la lista sale vacía
+    porque esa combinación no existe.
+
+    Como la matrícula es por periodo, los filtros necesitan saber de cuál se
+    habla. Se elige con un desplegable que arranca en el periodo en curso,
+    igual que Gestión → Cupos. Las matrículas retiradas no cuentan: quien se
+    retiró de Violín ya no es de Violín.
+    """
+
     template_name = "matriculas/usuario_lista.html"
+
+    def _periodo(self):
+        """El periodo sobre el que se filtra: el pedido, o el que esté en curso.
+
+        Siempre devuelve un periodo mientras exista alguno, y esa garantía
+        importa: si devolviera None, la consulta dejaría de acotar por periodo
+        y barrería el histórico entero mientras el desplegable enseña un
+        periodo concreto seleccionado. Por eso un id inexistente en la URL no
+        se queda en None, y por eso hay un último recurso al periodo más
+        reciente para cuando el personal no ha marcado ninguno en curso.
+        """
+        pedido = self.request.GET.get("periodo")
+        if pedido:
+            elegido = Periodo.objects.filter(pk=pedido).first()
+            if elegido is not None:
+                return elegido
+        return Periodo.en_curso() or Periodo.objects.order_by("-fecha_inicio").first()
+
+    def _seleccion(self):
+        """Los filtros pedidos, ya resueltos a objetos (None si no aplican)."""
+        get = self.request.GET.get
+        return {
+            "rol": get("rol") or "",
+            "area": Area.objects.filter(pk=get("area")).first() if get("area") else None,
+            "promotoria": (
+                Promotoria.objects.filter(pk=get("promotoria")).first()
+                if get("promotoria") else None
+            ),
+            "grupo": Grupo.objects.filter(pk=get("grupo")).first() if get("grupo") else None,
+            "periodo": self._periodo(),
+        }
 
     def get_queryset(self):
         # Los pendientes de rol (rol="") quedan primero para que no se pierdan de vista.
-        return Perfil.objects.select_related("usuario").order_by("rol", "nombre_completo")
+        qs = Perfil.objects.select_related("usuario").order_by("rol", "nombre_completo")
+        sel = self.seleccion = self._seleccion()
+
+        if sel["rol"] == ROL_PENDIENTE:
+            qs = qs.filter(rol="")
+        elif sel["rol"]:
+            qs = qs.filter(rol=sel["rol"])
+
+        if not (sel["area"] or sel["promotoria"] or sel["grupo"]):
+            return qs
+
+        # Rama de estudiantes: se resuelve sobre Matricula y no con un filtro
+        # encadenado sobre Perfil porque hay que excluir las retiradas DENTRO
+        # de la misma matrícula. Encadenando `~Q(...)` sobre una relación de
+        # varios valores, Django lo convierte en una subconsulta que descarta al
+        # estudiante entero si tiene alguna retirada, aunque siga matriculado.
+        matriculas = Matricula.objects.exclude(estado="retirada")
+        if sel["periodo"] is not None:
+            matriculas = matriculas.filter(periodo=sel["periodo"])
+        if sel["grupo"] is not None:
+            matriculas = matriculas.filter(grupo=sel["grupo"])
+        if sel["promotoria"] is not None:
+            matriculas = matriculas.filter(promotoria=sel["promotoria"])
+        if sel["area"] is not None:
+            matriculas = matriculas.filter(promotoria__area=sel["area"])
+        condicion = Q(pk__in=matriculas.values("estudiante_id"))
+
+        # Rama de profesores: solo cuando no se filtró por grupo (ver docstring).
+        # Va por Promotoria y no por Matricula, porque el vínculo del profesor
+        # con su promotoría no depende de que alguien se haya matriculado ni de
+        # qué periodo se esté mirando.
+        if sel["grupo"] is None:
+            promotorias = Promotoria.objects.exclude(profesor__isnull=True)
+            if sel["promotoria"] is not None:
+                promotorias = promotorias.filter(pk=sel["promotoria"].pk)
+            if sel["area"] is not None:
+                promotorias = promotorias.filter(area=sel["area"])
+            condicion |= Q(pk__in=promotorias.values("profesor_id"))
+
+        return qs.filter(condicion)
+
+    def get_context_data(self, **kwargs):
+        contexto = super().get_context_data(**kwargs)
+        sel = self.seleccion
+        contexto.update({
+            "seleccion": sel,
+            "roles": Perfil.ROLES,
+            "rol_pendiente": ROL_PENDIENTE,
+            "areas": Area.objects.order_by("nombre"),
+            # Agrupadas por área y por promotoría para poder pintarlas en
+            # <optgroup>: la jerarquía del catálogo se ve en el desplegable sin
+            # necesidad de recargar la página al elegir el departamento.
+            "promotorias": Promotoria.objects.select_related("area").order_by(
+                "area__nombre", "nombre",
+            ),
+            "grupos": Grupo.objects.select_related("promotoria").order_by(
+                "promotoria__nombre", "nivel",
+            ),
+            "periodos": Periodo.objects.order_by("-activo", "-fecha_inicio"),
+            "hay_filtros": bool(
+                sel["rol"] or sel["area"] or sel["promotoria"] or sel["grupo"]
+            ),
+        })
+        return contexto
 
 
 def _guardar_datos_estudiante(perfil, datos, datos_estudiante_existente, acudiente_existente):

@@ -508,6 +508,36 @@
      periodo, así que no usa el vocabulario de .estado. */
   .periodo-terminado { color: var(--ink-faint); font-size: 0.85rem; font-style: italic; }
 
+  /* Barra de filtros del listado de usuarios: una tira de controles sobre la
+     tabla, no un formulario con su propia tarjeta. Se lee como los rótulos de
+     una carpeta de archivador —etiqueta pequeña arriba, control debajo— y se
+     reparte en varias líneas cuando la pantalla no da. */
+  .filtros {
+    display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.75rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 0.9rem;
+  }
+  .filtro { display: flex; flex-direction: column; min-width: 0; }
+  .filtro label {
+    font-family: var(--font-mono); font-size: 0.68rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft);
+    margin-bottom: 0.25rem;
+  }
+  /* Los select del formulario base ocupan el 100%; aquí conviven varios en una
+     fila, así que se les deja ancho propio y un tope para que un nombre de
+     promotoría largo no empuje al resto fuera de la tarjeta. */
+  .filtro select { width: auto; max-width: 172px; margin: 0; padding: 0.45rem 0.55rem; font-size: 0.88rem; }
+  /* El botón sigue al último control en vez de irse al extremo derecho con un
+     margin-left:auto. En una sola fila la diferencia no se nota; en cuanto la
+     barra se parte en dos líneas, "auto" dejaba el botón descolgado al otro
+     lado de un hueco vacío, sin nada que lo ligara al formulario. */
+  .filtro-acciones { flex-direction: row; gap: 0.4rem; }
+  .filtros-nota { font-size: 0.82rem; color: var(--ink-soft); margin: 0 0 0.9rem; }
+
   /* Historial de matrículas por periodo (lo suyo el estudiante, la trayectoria
      de otro el personal). Cada periodo es una hoja fechada de la cartelera: el
      nombre del periodo hace de encabezado y a su lado va o la marca de que
@@ -672,6 +702,11 @@
     .stat-bar-etiqueta { flex-basis: 96px; }
     .dash-promotorias { margin-left: 0.8rem; padding-left: 0.6rem; }
     .dash-promotorias .stat-bar-etiqueta { flex-basis: 84px; }
+    /* Filtros a ancho completo: media fila por control es demasiado estrecho
+       para leer el nombre de una promotoría. */
+    .filtro { flex: 1 1 100%; }
+    .filtro select { max-width: none; width: 100%; }
+    .filtro-acciones { margin-left: 0; }
   }
 </style>
 {% comment %}

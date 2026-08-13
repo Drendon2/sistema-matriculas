@@ -20,9 +20,10 @@ from django.urls import reverse
 
 from .models import (
     RANURA_MAXIMA_ABSOLUTA,
-    Area, ConfiguracionInstitucion, DatosEstudiante, Matricula, Perfil,
+    Area, ConfiguracionInstitucion, DatosEstudiante, Grupo, Matricula, Perfil,
     Periodo, Promotoria, historial_por_periodo, resumen_trayectoria,
 )
+from .views_gestion import ROL_PENDIENTE
 
 
 class LimiteConfigurableTests(TestCase):
@@ -418,3 +419,175 @@ class HistorialTests(TestCase):
         # La matrícula del periodo terminado es historial cerrado: un solo botón.
         self.assertContains(respuesta, "Retirarme", count=1)
         self.assertContains(respuesta, "Periodo terminado", count=1)
+
+
+class FiltrosUsuariosTests(TestCase):
+    """Filtros del listado de usuarios (Gestión → Usuarios).
+
+    Lo que hay que cubrir es que cada filtro entienda cómo se relaciona cada
+    rol con el catálogo: el estudiante cuelga de una promotoría por su
+    matrícula y el profesor porque la dicta, así que filtrar por una
+    promotoría tiene que devolver a los dos. El grupo es la excepción, porque
+    solo tiene estudiantes.
+
+    Fixture: dos periodos, dos áreas con una promotoría cada una, un grupo, y
+    un usuario de cada rol.
+    """
+
+    def setUp(self):
+        self.pasado = Periodo.objects.create(
+            nombre="2025-1", fecha_inicio=date(2025, 1, 15), fecha_fin=date(2025, 6, 15),
+        )
+        self.actual = Periodo.objects.create(
+            nombre="2026-1", fecha_inicio=date(2026, 1, 15), fecha_fin=date(2026, 6, 15),
+            activo=True, matriculas_abiertas=True,
+        )
+        self.musica = Area.objects.create(nombre="Música")
+        self.teatro = Area.objects.create(nombre="Teatro")
+
+        self.profe_violin = self.crear(
+            "profe_violin", "profesor", "Profe Violín", "3000000001")
+        self.profe_teatro = self.crear(
+            "profe_teatro", "profesor", "Profe Teatro", "3000000002")
+        self.violin = Promotoria.objects.create(
+            nombre="Violín", area=self.musica, profesor=self.profe_violin)
+        self.actuacion = Promotoria.objects.create(
+            nombre="Actuación", area=self.teatro, profesor=self.profe_teatro)
+        self.basico = Grupo.objects.create(
+            promotoria=self.violin, nivel="basico", horario="L 8am",
+            salon="A1", cupo_maximo=10)
+
+        self.ana = self.crear("ana", "estudiante", "Ana Ruiz", "3000000003")
+        self.beto = self.crear("beto", "estudiante", "Beto Páez", "3000000004")
+        self.director = self.crear("dire", "director", "Dire", "3000000005")
+        self.admin = self.crear("admin1", "administrador", "Admin", "3000000006")
+        self.sin_rol = self.crear("nuevo", "", "Recien Llegado", "3000000007")
+
+        self.client.force_login(self.admin.usuario)
+
+    # -- utilidades ---------------------------------------------------------
+
+    def crear(self, username, rol, nombre, telefono):
+        usuario = User.objects.create_user(username=username, password="x")
+        return Perfil.objects.create(
+            usuario=usuario, rol=rol, nombre_completo=nombre,
+            fecha_nacimiento=date(1995, 3, 4), telefono=telefono,
+        )
+
+    def matricular(self, perfil, promotoria, periodo, estado="activa", grupo=None):
+        matricula = Matricula(
+            estudiante=perfil, promotoria=promotoria, periodo=periodo,
+            estado=estado, grupo=grupo,
+        )
+        matricula.full_clean()
+        matricula.save()
+        return matricula
+
+    def filtrar(self, **parametros):
+        """Nombres de los perfiles que devuelve el listado con esos filtros."""
+        respuesta = self.client.get(reverse("usuario_lista"), parametros)
+        self.assertEqual(respuesta.status_code, 200)
+        return sorted(p.nombre_completo for p in respuesta.context["object_list"])
+
+    # -- rol ----------------------------------------------------------------
+
+    def test_sin_filtros_salen_todos(self):
+        self.assertEqual(len(self.filtrar()), 7)
+
+    def test_filtra_por_rol(self):
+        self.assertEqual(self.filtrar(rol="profesor"), ["Profe Teatro", "Profe Violín"])
+
+    def test_filtra_a_los_pendientes_de_rol(self):
+        """El centinela hace falta porque "sin rol" es la cadena vacía, que en
+        un GET ya significa "no filtres"."""
+        self.assertEqual(self.filtrar(rol=ROL_PENDIENTE), ["Recien Llegado"])
+
+    # -- catálogo -----------------------------------------------------------
+
+    def test_la_promotoria_devuelve_al_matriculado_y_a_su_profesor(self):
+        self.matricular(self.ana, self.violin, self.actual)
+
+        self.assertEqual(
+            self.filtrar(promotoria=self.violin.id), ["Ana Ruiz", "Profe Violín"]
+        )
+
+    def test_el_departamento_arrastra_sus_promotorias(self):
+        self.matricular(self.ana, self.violin, self.actual)
+        self.matricular(self.beto, self.actuacion, self.actual)
+
+        self.assertEqual(self.filtrar(area=self.musica.id), ["Ana Ruiz", "Profe Violín"])
+
+    def test_el_grupo_no_devuelve_al_profesor(self):
+        """Un grupo solo tiene estudiantes: ahí el profesor no pinta nada."""
+        self.matricular(self.ana, self.violin, self.actual, grupo=self.basico)
+
+        self.assertEqual(self.filtrar(grupo=self.basico.id), ["Ana Ruiz"])
+
+    def test_una_matricula_retirada_no_cuenta(self):
+        """Quien se retiró de Violín ya no es de Violín."""
+        self.matricular(self.ana, self.violin, self.actual, estado="retirada")
+
+        self.assertEqual(self.filtrar(promotoria=self.violin.id), ["Profe Violín"])
+
+    def test_una_matricula_pendiente_si_cuenta(self):
+        self.matricular(self.ana, self.violin, self.actual, estado="pendiente")
+
+        self.assertEqual(
+            self.filtrar(promotoria=self.violin.id), ["Ana Ruiz", "Profe Violín"]
+        )
+
+    # -- periodo ------------------------------------------------------------
+
+    def test_el_periodo_acota_a_los_estudiantes_pero_no_al_profesor(self):
+        """Dictar una promotoría no depende del periodo; estar matriculado sí."""
+        self.matricular(self.ana, self.violin, self.pasado)
+
+        self.assertEqual(
+            self.filtrar(promotoria=self.violin.id, periodo=self.pasado.id),
+            ["Ana Ruiz", "Profe Violín"],
+        )
+        self.assertEqual(
+            self.filtrar(promotoria=self.violin.id, periodo=self.actual.id),
+            ["Profe Violín"],
+        )
+
+    def test_sin_periodo_pedido_se_usa_el_que_esta_en_curso(self):
+        self.matricular(self.ana, self.violin, self.pasado)
+        self.matricular(self.beto, self.violin, self.actual)
+
+        self.assertEqual(
+            self.filtrar(promotoria=self.violin.id), ["Beto Páez", "Profe Violín"]
+        )
+
+    def test_un_periodo_inexistente_no_abre_la_busqueda_a_todo_el_historico(self):
+        """Si esto devolviera None, la consulta dejaria de acotar por periodo y
+        barreria el historico entero mientras el desplegable enseña otra cosa."""
+        self.matricular(self.ana, self.violin, self.pasado)
+        self.matricular(self.beto, self.violin, self.actual)
+
+        self.assertEqual(
+            self.filtrar(promotoria=self.violin.id, periodo=99999),
+            ["Beto Páez", "Profe Violín"],
+        )
+
+    # -- combinaciones ------------------------------------------------------
+
+    def test_el_rol_se_cruza_con_la_promotoria(self):
+        self.matricular(self.ana, self.violin, self.actual)
+
+        self.assertEqual(
+            self.filtrar(promotoria=self.violin.id, rol="estudiante"), ["Ana Ruiz"]
+        )
+
+    def test_un_rol_que_no_cuelga_del_catalogo_da_lista_vacia(self):
+        """Cruzar administrador con una promotoría no existe: vacío correcto."""
+        self.matricular(self.ana, self.violin, self.actual)
+
+        self.assertEqual(self.filtrar(promotoria=self.violin.id, rol="administrador"), [])
+
+    def test_un_estudiante_no_entra_al_listado(self):
+        self.client.force_login(self.ana.usuario)
+
+        respuesta = self.client.get(reverse("usuario_lista"))
+
+        self.assertNotEqual(respuesta.status_code, 200)

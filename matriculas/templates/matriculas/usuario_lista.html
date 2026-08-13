@@ -1,4 +1,5 @@
 {% extends "matriculas/base.html" %}
+{% load matriculas_extras %}
 
 {% block title %}Usuarios{% endblock %}
 
@@ -7,8 +8,97 @@
 <h2>Usuarios</h2>
 <p><a class="btn" href="{% url 'usuario_nuevo' %}">+ Nuevo usuario</a></p>
 
+<form method="get" class="filtros">
+  <div class="filtro">
+    <label for="f-rol">Rol</label>
+    <select name="rol" id="f-rol">
+      <option value="">Todos</option>
+      {% for valor, etiqueta in roles %}
+        <option value="{{ valor }}" {% if seleccion.rol == valor %}selected{% endif %}>{{ etiqueta }}</option>
+      {% endfor %}
+      <option value="{{ rol_pendiente }}" {% if seleccion.rol == rol_pendiente %}selected{% endif %}>
+        Pendiente de rol
+      </option>
+    </select>
+  </div>
+
+  <div class="filtro">
+    <label for="f-area">Departamento</label>
+    <select name="area" id="f-area">
+      <option value="">Todos</option>
+      {% for area in areas %}
+        <option value="{{ area.id }}" {% if seleccion.area.id == area.id %}selected{% endif %}>{{ area.nombre }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="filtro">
+    <label for="f-promotoria">Promotoría</label>
+    <select name="promotoria" id="f-promotoria">
+      <option value="">Todas</option>
+      {% regroup promotorias by area as por_area %}
+      {% for grupo_area in por_area %}
+      <optgroup label="{{ grupo_area.grouper.nombre }}">
+        {% for p in grupo_area.list %}
+          <option value="{{ p.id }}" {% if seleccion.promotoria.id == p.id %}selected{% endif %}>{{ p.nombre }}</option>
+        {% endfor %}
+      </optgroup>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="filtro">
+    <label for="f-grupo">Grupo</label>
+    <select name="grupo" id="f-grupo">
+      <option value="">Todos</option>
+      {% regroup grupos by promotoria as por_promotoria %}
+      {% for bloque in por_promotoria %}
+      <optgroup label="{{ bloque.grouper.nombre }}">
+        {% for g in bloque.list %}
+          <option value="{{ g.id }}" {% if seleccion.grupo.id == g.id %}selected{% endif %}>
+            {{ g.get_nivel_display }} · {{ g.horario }}
+          </option>
+        {% endfor %}
+      </optgroup>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="filtro">
+    <label for="f-periodo">Periodo</label>
+    <select name="periodo" id="f-periodo">
+      {% for p in periodos %}
+        <option value="{{ p.id }}" {% if seleccion.periodo.id == p.id %}selected{% endif %}>
+          {{ p.nombre }}{% if p.activo %} (en curso){% endif %}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="filtro filtro-acciones">
+    <button type="submit" class="btn btn-sm">Filtrar</button>
+    {% if hay_filtros %}
+      <a class="btn btn-blanco btn-sm" href="{% url 'usuario_lista' %}">Limpiar</a>
+    {% endif %}
+  </div>
+</form>
+
+{% if hay_filtros %}
+<p class="filtros-nota">
+  {{ object_list|length }} usuario{{ object_list|length|pluralize }}
+  {% if seleccion.area or seleccion.promotoria or seleccion.grupo %}
+    · matrículas de <strong>{{ seleccion.periodo.nombre|default:"ningún periodo" }}</strong>,
+    sin contar las retiradas
+  {% endif %}
+</p>
+{% endif %}
+
 {% if not object_list %}
-  <p class="vacio">Todavía no hay usuarios.</p>
+  {% if hay_filtros %}
+    <p class="vacio">Ningún usuario coincide con estos filtros.</p>
+  {% else %}
+    <p class="vacio">Todavía no hay usuarios.</p>
+  {% endif %}
 {% else %}
 <table>
   <thead>
