@@ -48,6 +48,14 @@ colors:
     value: "#a83cae"
   tag-7-ocre:
     value: "#766a19"
+  chart-1-azul:
+    value: "#2a78d6"
+  chart-2-naranja:
+    value: "#eb6834"
+  chart-3-aqua:
+    value: "#1baf7a"
+  chart-4-violeta:
+    value: "#4a3aa7"
 typography:
   headline:
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
@@ -161,8 +169,19 @@ Paleta de cartelera de estudio: blanco-pizarra y tinta carbón, con un único ve
 ### Área (colores de etiqueta)
 Ocho colores rotan por `Area.id` (ver `matriculas/templatetags/matriculas_extras.py::tag_color`), como marcadores de color distintos por disciplina: ámbar, violeta, rosa, verde azulado, índigo, naranja, magenta, ocre. Todos verificados en ≥4.5:1 sobre blanco. Un color de etiqueta identifica una disciplina — nunca comunica una acción ni un estado.
 
+### Gráfica (rampa categórica)
+Cuatro tonos exclusivos de las gráficas de sectores, en orden de asignación fijo: **azul** (`#2a78d6`), **naranja** (`#eb6834`), **aqua** (`#1baf7a`) y **violeta** (`#4a3aa7`). No son los colores de Área, y esa separación es deliberada por dos motivos.
+
+El primero es semántico: en la pantalla de Estadísticas los `tag-*` ya significan "Área" en el árbol de departamentos, y reutilizarlos abajo para género o zona haría que el mismo violeta dijera dos cosas distintas en una sola página.
+
+El segundo es de accesibilidad, y es el que cierra la puerta: la rampa de Área **no pasa** la comprobación para una torta. Su verde azulado y su rosa (`#12676a` / `#c4447b`) quedan en ΔE 2.8 bajo daltonismo protán, muy por debajo del umbral de 8 — para bastante gente serían el mismo sector. Los cuatro de arriba están validados comparando **todos los pares entre sí**, no solo los contiguos, porque en una torta cualquier sector se compara con cualquier otro. El aqua queda por debajo de 3:1 contra el fondo, y su compensación obligatoria son las cifras visibles de la leyenda.
+
+El "sin responder" no pertenece a esta rampa: usa el gris de **Border Strong** (`#c3cfc7`) precisamente porque no es una categoría, es la ausencia de respuesta, y debe leerse como tal sin competir con las opciones reales.
+
 ### Named Rules
 **La Regla del Marcador, no del Matiz.** Ningún estado de matrícula se comunica solo por color: activa es sólida con punto, pendiente es punteada sin relleno, retirada es tachada. Cualquier pantalla nueva que muestre estado reproduce la forma completa.
+
+**La Regla de la Rampa de Gráfica.** Los cuatro tonos de gráfica son exclusivos de visualizaciones y se asignan **en el orden de la lista, por opción, nunca por ranking** — la opción conserva su color aunque caiga a cero, para que filtrar no repinte a las demás. Nunca se mezclan con los `tag-*` de Área ni con el esmeralda de marca. Una gráfica nueva que necesite colores parte de esta rampa; si necesita otros, se validan antes de usarlos, nunca se eligen a ojo.
 
 **La Regla del Esmeralda Único.** El acento verde es la marca y solo la marca — botones, enlaces, foco, éxito. Nunca se usa para "activa" (eso es azul) ni para error (eso es rojo); mezclarlos rompe la distinción entre "esto es la app" y "esto es un dato".
 
@@ -239,6 +258,20 @@ Un punto de 8px del color de Área (`tag-0`…`tag-7`, ver `tag_color`), antes d
 ### Data Bar (`.stat-bar-fila`) — Estadísticas
 Fila horizontal etiqueta + pista + relleno + cifra, para cualquier magnitud por categoría (estudiantes por promotoría, grupos por nivel, respuestas de encuesta). El relleno usa `--accent` por defecto (una sola magnitud, sin identidad que distinguir); cuando la categoría YA tiene un color propio en el sistema (Área → `tag_color`), el relleno reutiliza ese mismo color en vez de inventar uno nuevo — nunca un color distinto por barra sin motivo. El árbol Departamento → Promotoría (`.dash-departamento`/`.dash-promotorias`) anida las promotorías bajo su Área en vez de repetir la cifra en dos listas planas separadas. Ver la excepción de radio en Shapes.
 
+### Torta (`.torta`) — Estadísticas
+Disco de `116px` con su leyenda al lado, para las preguntas donde lo que importa es **qué parte del total** es cada opción y las opciones son pocas (género, zona). Las escalas con orden propio —estrato, nivel educativo— se quedan en barra de dato: una torta las obligaría a comparar ángulos parecidos.
+
+Cada sector es un `<circle>` con el trazo tan grueso como el diámetro y `stroke-dasharray` recortando su arco; el grupo va rotado `-90°` para empezar a las 12. Sin JavaScript ni librerías: la geometría se calcula en la vista. Entre sectores va un hueco de `2px` del color del fondo — **separación, nunca un borde dibujado alrededor**; un sector único no lo lleva, porque solo dejaría una muesca contra sí mismo.
+
+La leyenda no es un pie de foto, es la mitad de la gráfica: lleva el punto de color, la etiqueta, la cifra y el porcentaje. Es lo que permite leerla sin depender del matiz, y la compensación obligatoria del tono que no alcanza 3:1. Lista **todas** las opciones, incluidas las que están en cero —que por definición no dibujan sector— atenuadas en tinta tenue: si desaparecieran, nadie sabría que la opción existe.
+
+**El todo de la torta es el total de encuestas, no la suma de respuestas.** En una pregunta opcional esa distinción lo cambia todo: con una sola respuesta de dieciséis, una torta de solo respondientes afirmaría que el 100% de la gente vive en zona rural. El resto entra como sector gris de "sin responder".
+
+### Barra de filtros (`.filtros`)
+Tira de controles sobre una tabla, en tarjeta propia con `--shadow` — etiqueta pequeña en monoespaciada arriba, control debajo, como los rótulos de una carpeta de archivador. Se reparte en varias líneas cuando la pantalla no da, y bajo 640px cada control pasa a ancho completo: media fila es demasiado estrecho para leer el nombre de una promotoría.
+
+El botón de acción **sigue al último control** en vez de irse al extremo derecho: en una sola fila la diferencia no se nota, pero en cuanto la barra se parte en dos líneas un `margin-left: auto` lo deja descolgado al otro lado de un hueco vacío. Los desplegables jerárquicos usan `<optgroup>` (Promotoría agrupada por Área, Grupo por Promotoría), así la jerarquía del catálogo se ve sin recargar la página al elegir el nivel de arriba. "Limpiar" solo aparece cuando hay algún filtro puesto.
+
 ### Navigation
 - **Barra superior:** riel claro (blanco, borde inferior fino), título en negrita frase normal, enlaces en frase normal con fondo suave al pasar el cursor.
 - **Pestañas de sección (`.tarjeta-enlace`):** ficha pineada con el pin de esquina (ver Shapes) — el vocabulario de navegación del hub de Gestión.
@@ -267,6 +300,8 @@ El sello circular `.escudo` (52px, fondo blanco, borde esmeralda de 2px, inicial
 - **Do** mantener la monoespaciada exclusiva a IDs, cifras y estados — nunca en prosa ni títulos.
 - **Do** mantener cada campo de formulario en `1rem` mínimo en cualquier breakpoint.
 - **Do** usar `--shadow` como mínimo en toda superficie de contenido nueva — en este mundo, todo está pineado.
+- **Do** validar cualquier paleta de gráfica antes de usarla, comparando todos los pares entre sí — la rampa de Área ya falló esa prueba una vez.
+- **Do** contar el total de la población como el todo de una gráfica de partes, y mostrar lo que falta como "sin responder" en gris.
 
 ### Don't:
 - **Don't** usar el esmeralda de marca para un estado de datos (activa/error) — es exclusivamente el color de marca/acción.
@@ -274,3 +309,6 @@ El sello circular `.escudo` (52px, fondo blanco, borde esmeralda de 2px, inicial
 - **Don't** volver a las mayúsculas trazadas en botones o navegación — ese vocabulario pertenece al mundo anterior de este producto.
 - **Don't** inventar cifras sociales (seguidores, likes) en "Mi perfil" — solo cifras reales derivadas de los datos del usuario.
 - **Don't** aplanar una tarjeta quitándole `--shadow` "para simplificar" — en este mundo nada descansa plano, todo está pineado.
+- **Don't** usar los colores de Área (`tag-*`) en una gráfica de sectores — además de chocar semánticamente con el árbol de departamentos, su verde azulado y su rosa son indistinguibles bajo daltonismo protán.
+- **Don't** asignar el color de una gráfica por ranking — sigue a la opción, para que filtrar o cambiar los conteos no repinte a las demás.
+- **Don't** separar sectores ni barras con un borde dibujado alrededor — la separación es un hueco del color del fondo.
