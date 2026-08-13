@@ -100,7 +100,7 @@
   <div class="dash-grid-2">
     <div>
       <h4>Género</h4>
-      {% include "matriculas/_stat_barras.html" with filas=genero_stats %}
+      {% include "matriculas/_stat_torta.html" with torta=genero_torta %}
     </div>
     <div>
       <h4>Estrato</h4>
@@ -143,7 +143,7 @@
   <div class="dash-grid-2" style="margin-top: 1.3rem;">
     <div>
       <h4>Zona <span class="h4-nota">(opcional)</span></h4>
-      {% include "matriculas/_stat_barras.html" with filas=zona_stats %}
+      {% include "matriculas/_stat_torta.html" with torta=zona_torta %}
     </div>
     <div>
       <h4>Afiliación a salud <span class="h4-nota">(opcional)</span></h4>

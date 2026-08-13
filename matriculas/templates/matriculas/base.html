@@ -298,6 +298,37 @@
      del título. Antes iba repetida como estilo en línea en cada h4. */
   .h4-nota { font-weight: 400; text-transform: none; letter-spacing: normal; }
 
+  /* Torta: el disco a la izquierda y su leyenda al lado, porque la leyenda no
+     es un pie de foto sino la mitad de la gráfica — lleva el número y el
+     porcentaje de cada sector. */
+  .torta-bloque { display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; }
+  .torta { width: 116px; height: 116px; flex-shrink: 0; }
+  .torta-leyenda { list-style: none; padding: 0; margin: 0; flex: 1 1 190px; min-width: 0; }
+  .torta-leyenda li {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.28rem 0; font-size: 0.85rem;
+  }
+  /* Una opción sin respuestas no dibuja sector; en la leyenda se atenúa para
+     que se vea que existe y que está en cero, sin pesar como las demás. */
+  .torta-leyenda-cero { color: var(--ink-faint); }
+  .torta-punto {
+    /* Círculo, como los otros dos puntos de leyenda del sistema (.tag-dot y el
+       .punto de dash-split-leyenda): es la forma que este proyecto ya usa para
+       "esto identifica una serie". */
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+    /* Anillo del color del fondo: separa el punto de la fila igual que la
+       separación entre sectores separa el disco. */
+    box-shadow: 0 0 0 1px var(--surface);
+  }
+  .torta-etiqueta { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Cifras en la fuente mono y alineadas por columna: se leen en vertical como
+     una tabla, que es para lo que están. */
+  .torta-cifra, .torta-parte {
+    font-family: var(--font-mono); font-weight: 700; flex-shrink: 0; text-align: right;
+  }
+  .torta-cifra { min-width: 1.6rem; color: var(--ink); }
+  .torta-parte { min-width: 2.6rem; color: var(--ink-faint); font-weight: 400; }
+
   .dash-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
 
   .carne {

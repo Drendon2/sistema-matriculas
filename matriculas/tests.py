@@ -11,11 +11,12 @@ y `PantallaConfiguracionTests`.
 `HistorialTests` cubre lo otro: la trayectoria del estudiante por periodos.
 """
 
+import math
 from datetime import date
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
 from .models import (
@@ -24,7 +25,9 @@ from .models import (
     Matricula, Perfil, Periodo, Promotoria, historial_por_periodo,
     resumen_trayectoria,
 )
-from .views_gestion import ROL_PENDIENTE
+from .views_gestion import (
+    RADIO_TORTA, ROL_PENDIENTE, SEPARACION_TORTA, _torta,
+)
 
 
 class LimiteConfigurableTests(TestCase):
@@ -715,10 +718,14 @@ class EncuestaChoicesTests(TestCase):
         respuesta = self.client.get(reverse("gestion_estadisticas"))
 
         self.assertEqual(respuesta.status_code, 200)
-        zona = {f["etiqueta"]: f["total"] for f in respuesta.context["zona_stats"]}
-        # Todas las opciones aparecen, incluidas las que nadie eligió: así el
-        # panel enseña siempre la misma lista y se ve qué NO contesta la gente.
+        # Zona se dibuja en torta, así que sus cifras viven en la leyenda. Todas
+        # las opciones aparecen, incluidas las que nadie eligió: así el panel
+        # enseña siempre la misma lista y se ve qué NO contesta la gente.
+        zona = {
+            e["etiqueta"]: e["total"] for e in respuesta.context["zona_torta"]["leyenda"]
+        }
         self.assertEqual(zona, {"Urbana": 0, "Rural": 1, "Centro poblado": 0})
+        # Nivel educativo sigue en barras: es una escala con orden propio.
         niveles = {f["etiqueta"]: f["total"] for f in respuesta.context["nivel_educativo_stats"]}
         self.assertEqual(niveles["Secundaria completa"], 1)
 
@@ -745,3 +752,88 @@ class EncuestaChoicesTests(TestCase):
         self.assertContains(respuesta, "Urbana")
         # El código interno no se le enseña a nadie.
         self.assertNotContains(respuesta, "tecnologo")
+
+
+class TortaTests(SimpleTestCase):
+    """Geometría y honestidad de las gráficas de torta (género y zona).
+
+    `_torta` no toca la base de datos: recibe el conteo ya hecho, así que se
+    prueba con filas sintéticas. Lo que hay que fijar es la aritmética de los
+    arcos y, sobre todo, cuál es el TODO de la torta.
+    """
+
+    CIRCUNFERENCIA = 2 * math.pi * RADIO_TORTA
+
+    def filas(self, *pares):
+        return [{"etiqueta": etiqueta, "total": total} for etiqueta, total in pares]
+
+    def test_el_todo_es_el_total_de_encuestas_no_las_respuestas(self):
+        """Lo que impide que la torta mienta en una pregunta opcional.
+
+        Una sola respuesta de dieciséis no significa que el 100% de la gente
+        viva en zona rural.
+        """
+        torta = _torta(self.filas(("Urbana", 0), ("Rural", 1)), total_encuestas=16)
+
+        partes = {e["etiqueta"]: e["parte"] for e in torta["leyenda"]}
+        self.assertEqual(partes["Rural"], 6)
+        self.assertEqual(partes["Sin responder"], 94)
+
+    def test_sin_huecos_cuando_todos_respondieron(self):
+        """En una pregunta obligatoria no sobra nadie, así que no hay sector gris."""
+        torta = _torta(self.filas(("Femenino", 1), ("Masculino", 3)), total_encuestas=4)
+
+        self.assertNotIn("Sin responder", [e["etiqueta"] for e in torta["leyenda"]])
+        self.assertEqual(torta["total"], 4)
+
+    def test_las_partes_suman_cien(self):
+        torta = _torta(
+            self.filas(("Urbana", 2), ("Rural", 1), ("Centro poblado", 1)),
+            total_encuestas=4,
+        )
+
+        self.assertEqual(sum(e["parte"] for e in torta["leyenda"]), 100)
+
+    def test_los_sectores_se_encadenan_sin_solaparse(self):
+        """Cada sector arranca donde acaba el anterior, medido en la circunferencia."""
+        torta = _torta(self.filas(("Urbana", 1), ("Rural", 3)), total_encuestas=4)
+
+        primero, segundo = torta["sectores"]
+        self.assertEqual(primero["desfase"], 0)
+        # El segundo empieza a un cuarto de vuelta: 1 de 4.
+        self.assertAlmostEqual(-segundo["desfase"], self.CIRCUNFERENCIA / 4, places=1)
+        # Y cada arco lleva restado el hueco de separación.
+        self.assertAlmostEqual(
+            primero["trazo"], self.CIRCUNFERENCIA / 4 - SEPARACION_TORTA, places=1,
+        )
+
+    def test_una_opcion_sin_respuestas_no_dibuja_sector_pero_sale_en_la_leyenda(self):
+        """Si desapareciera del todo, nadie sabría que la opción existe."""
+        torta = _torta(self.filas(("Urbana", 0), ("Rural", 4)), total_encuestas=4)
+
+        self.assertEqual([s["etiqueta"] for s in torta["sectores"]], ["Rural"])
+        self.assertIn("Urbana", [e["etiqueta"] for e in torta["leyenda"]])
+
+    def test_el_color_sigue_a_la_opcion_y_no_a_su_puesto(self):
+        """Un filtro que cambie los conteos no puede repintar a los demás."""
+        muchos = _torta(self.filas(("Urbana", 5), ("Rural", 1)), total_encuestas=6)
+        pocos = _torta(self.filas(("Urbana", 0), ("Rural", 6)), total_encuestas=6)
+
+        color = lambda t, cual: next(
+            e["color"] for e in t["leyenda"] if e["etiqueta"] == cual
+        )
+        self.assertEqual(color(muchos, "Urbana"), color(pocos, "Urbana"))
+        self.assertEqual(color(muchos, "Rural"), color(pocos, "Rural"))
+
+    def test_un_solo_sector_da_la_vuelta_entera(self):
+        """Restarle el hueco dejaría una muesca contra sí mismo."""
+        torta = _torta(self.filas(("Urbana", 4)), total_encuestas=4)
+
+        [unico] = torta["sectores"]
+        self.assertAlmostEqual(unico["trazo"], self.CIRCUNFERENCIA, places=1)
+
+    def test_sin_ninguna_encuesta_no_hay_torta(self):
+        torta = _torta(self.filas(("Urbana", 0), ("Rural", 0)), total_encuestas=0)
+
+        self.assertEqual(torta["sectores"], [])
+        self.assertEqual(torta["total"], 0)

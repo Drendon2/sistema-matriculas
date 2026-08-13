@@ -1,3 +1,5 @@
+import math
+
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib.auth.models import User
@@ -264,6 +266,90 @@ def _con_porcentaje(filas, campo="total"):
     return filas
 
 
+# Paleta de las tortas. NO son los --tag-* del proyecto por dos razones: en esta
+# misma página esos colores ya significan "Área" en el árbol de arriba, y además
+# su teal y su magenta son indistinguibles para daltonismo protán (ΔE 2.8, muy
+# por debajo del umbral de 8). Estos cuatro pasan las seis comprobaciones del
+# validador comparando TODOS los pares entre sí, que es lo que exige una torta:
+# en ella cualquier sector se compara con cualquier otro, no solo con el vecino.
+#
+# El proyecto es de un solo tema (claro). Si algún día gana modo oscuro, estos
+# tonos hay que volver a escalonarlos contra la superficie oscura y revalidarlos:
+# invertirlos sin más no sirve.
+COLORES_TORTA = ["#2a78d6", "#eb6834", "#1baf7a", "#4a3aa7"]
+
+# El "sin responder" va en gris a propósito, fuera de la paleta categórica: no
+# es una opción más de la pregunta, es la ausencia de respuesta, y tiene que
+# leerse como tal y no competir con las demás.
+COLOR_SIN_RESPUESTA = "#c3cfc7"
+
+RADIO_TORTA = 30          # el trazo, del mismo grosor que el diámetro, rellena el disco
+SEPARACION_TORTA = 2      # hueco en px entre sectores contiguos
+
+
+def _torta(filas, total_encuestas):
+    """Sectores y leyenda de una gráfica de torta, a partir de un conteo por opción.
+
+    Se dibuja con un `<circle>` por sector y `stroke-dasharray` en vez de rutas
+    de arco: un trazo tan grueso como el diámetro rellena el disco entero, así
+    que cada sector sale sin una línea de trigonometría y el hueco entre ellos
+    es simplemente un tramo del guion que no se pinta.
+
+    El todo de la torta es el total de encuestas, NO la suma de respuestas. En
+    las preguntas opcionales eso cambia el dibujo por completo: si tres de
+    dieciséis contestaron la zona, una torta de solo esos tres diría que el 100%
+    de la gente vive donde vivan ellos. El resto entra como un sector gris de
+    "sin responder", que es la respuesta honesta.
+
+    Devuelve los sectores a pintar (solo los que tienen valor: un sector de 0°
+    no se dibuja) y una leyenda con TODAS las opciones, incluidas las que nadie
+    eligió. La leyenda es la que explica un sector ausente.
+    """
+    filas = list(filas)
+    respondidas = sum(fila["total"] for fila in filas)
+    sin_responder = max(0, total_encuestas - respondidas)
+    total = respondidas + sin_responder
+
+    leyenda = [
+        dict(fila, color=COLORES_TORTA[indice % len(COLORES_TORTA)])
+        for indice, fila in enumerate(filas)
+    ]
+    if sin_responder:
+        leyenda.append({
+            "etiqueta": "Sin responder",
+            "total": sin_responder,
+            "color": COLOR_SIN_RESPUESTA,
+        })
+
+    for entrada in leyenda:
+        entrada["parte"] = round((entrada["total"] / total) * 100) if total else 0
+
+    if not total:
+        return {"sectores": [], "leyenda": leyenda, "total": 0}
+
+    circunferencia = 2 * math.pi * RADIO_TORTA
+    con_valor = [entrada for entrada in leyenda if entrada["total"] > 0]
+
+    sectores, recorrido = [], 0.0
+    for entrada in con_valor:
+        arco = circunferencia * entrada["total"] / total
+        # Un único sector ocuparía la vuelta entera: restarle el hueco solo
+        # dejaría una muesca contra sí mismo, así que ahí no se separa nada.
+        visible = arco if len(con_valor) == 1 else max(arco - SEPARACION_TORTA, 0.5)
+        sectores.append({
+            "color": entrada["color"],
+            "etiqueta": entrada["etiqueta"],
+            "total": entrada["total"],
+            "parte": entrada["parte"],
+            "trazo": round(visible, 2),
+            "resto": round(circunferencia, 2),
+            "desfase": round(-recorrido, 2),
+        })
+        recorrido += arco
+
+    return {"sectores": sectores, "leyenda": leyenda, "total": total}
+
+
 def _stats_choices(encuesta_qs, campo, choices):
     """Conteo de un campo de la encuesta por cada opción declarada.
 
@@ -372,7 +458,16 @@ def estadisticas(request):
         "total_grupos": Grupo.objects.count(),
         "total_encuestas": total_encuestas,
         "total_con_rol": Perfil.objects.exclude(rol="").count(),
-        "genero_stats": genero_stats,
+        # Género y zona van en torta y no en barras: en las dos la pregunta es
+        # qué parte del total es cada opción, y son pocas (4 y 3). El resto de
+        # escalas sigue en barras, que es lo correcto para comparar magnitudes
+        # y para escalas con orden propio como el estrato o el nivel educativo,
+        # donde una torta obligaría a comparar ángulos parecidos.
+        "genero_torta": _torta(genero_stats, total_encuestas),
+        "zona_torta": _torta(
+            _stats_choices(encuesta_qs, "zona", EncuestaDemografica.ZONAS),
+            total_encuestas,
+        ),
         "estrato_stats": estrato_stats,
         "autoriza_si": autoriza_si,
         "autoriza_no": autoriza_no,
@@ -382,8 +477,6 @@ def estadisticas(request):
             encuesta_qs, "nivel_educativo", EncuestaDemografica.NIVELES_EDUCATIVOS),
         "ocupacion_stats": _stats_choices(
             encuesta_qs, "ocupacion", EncuestaDemografica.OCUPACIONES),
-        "zona_stats": _stats_choices(
-            encuesta_qs, "zona", EncuestaDemografica.ZONAS),
         "afiliacion_salud_stats": _stats_choices(
             encuesta_qs, "afiliacion_salud", EncuestaDemografica.AFILIACIONES_SALUD),
         "grupo_etnico_stats": _stats_choices(
