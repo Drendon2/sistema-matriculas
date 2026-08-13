@@ -40,7 +40,7 @@
     {% for e in item.pendientes %}
     <tr>
       <td>{% if e.perfil.foto_perfil %}<img class="foto-mini" src="{% url 'ver_foto' e.perfil.id %}" alt="">{% endif %}</td>
-      <td>{{ e.perfil.nombre_completo }}</td>
+      <td><a href="{% url 'historial_estudiante' e.perfil.id %}">{{ e.perfil.nombre_completo }}</a></td>
       <td>
         {% if e.renovacion %}
           <span class="trayectoria trayectoria-renovacion">Renovación</span>
@@ -107,7 +107,7 @@
       {% for e in g.estudiantes %}
       <tr>
         <td>{% if e.perfil.foto_perfil %}<img class="foto-mini" src="{% url 'ver_foto' e.perfil.id %}" alt="">{% endif %}</td>
-        <td>{{ e.perfil.nombre_completo }}</td>
+        <td><a href="{% url 'historial_estudiante' e.perfil.id %}">{{ e.perfil.nombre_completo }}</a></td>
         <td>{{ e.perfil.edad }}</td>
         <td>{{ e.perfil.telefono }}</td>
         <td>
@@ -148,7 +148,7 @@
     {% for e in item.sin_grupo %}
     <tr>
       <td>{% if e.perfil.foto_perfil %}<img class="foto-mini" src="{% url 'ver_foto' e.perfil.id %}" alt="">{% endif %}</td>
-      <td>{{ e.perfil.nombre_completo }}</td>
+      <td><a href="{% url 'historial_estudiante' e.perfil.id %}">{{ e.perfil.nombre_completo }}</a></td>
       <td>{{ e.perfil.edad }}</td>
       <td>{{ e.perfil.telefono }}</td>
       <td>

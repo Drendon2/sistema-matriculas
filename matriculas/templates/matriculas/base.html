@@ -266,7 +266,9 @@
   .tag-4 { background: var(--tag-4); } .tag-5 { background: var(--tag-5); }
   .tag-6 { background: var(--tag-6); } .tag-7 { background: var(--tag-7); }
 
-  /* Estadísticas de Gestión (solo administrador). */
+  /* Cifras de cabecera: nacieron en las estadísticas de Gestión (solo
+     administrador) y las reusa el resumen del historial de un estudiante, que
+     sí ve todo el personal — y el propio estudiante sobre lo suyo. */
   .dash-resumen { display: flex; flex-wrap: wrap; gap: 1.75rem; margin: 0 0 0.5rem; }
   .dash-stat-num { display: block; font-family: var(--font-mono); font-weight: 700; font-size: 1.5rem; color: var(--ink); }
   .dash-stat-label { font-size: 0.72rem; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.03em; }
@@ -505,6 +507,39 @@
   /* Periodo cerrado: no es un estado de la matrícula, es una nota sobre el
      periodo, así que no usa el vocabulario de .estado. */
   .periodo-terminado { color: var(--ink-faint); font-size: 0.85rem; font-style: italic; }
+
+  /* Historial de matrículas por periodo (lo suyo el estudiante, la trayectoria
+     de otro el personal). Cada periodo es una hoja fechada de la cartelera: el
+     nombre del periodo hace de encabezado y a su lado va o la marca de que
+     sigue en curso, o las fechas de una que ya se archivó. */
+  .historial-resumen { margin-bottom: 1.8rem; }
+  .historial-bloque { margin-bottom: 1.8rem; }
+  .historial-cabecera {
+    display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.6rem;
+    margin: 0 0 0.7rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border);
+  }
+  /* Reinicia el margen de h3, que está pensado para separar secciones sueltas;
+     aquí el ritmo lo pone .historial-bloque. */
+  .historial-periodo { margin: 0; font-size: 1.05rem; }
+  /* El periodo vigente se marca con el acento, igual que el enlace activo de la
+     cabecera: es el "usted está aquí" del historial. */
+  .historial-marca {
+    font-family: var(--font-mono); font-size: 0.62rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.045em;
+    color: var(--accent-dark); background: var(--accent-soft);
+    /* Derivado del acento y NO un rgba() fijo: el color de marca lo cambia el
+       administrador en caliente (ver el <style> del final), así que un verde
+       quemado aquí sobreviviría al cambio de marca. */
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    padding: 0.15rem 0.45rem; border-radius: var(--radius-sm); white-space: nowrap;
+  }
+  .historial-fechas { font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-faint); }
+  /* El Área acompaña al nombre de la promotoría sin competir con él: el punto de
+     color ya la identifica, este texto solo la nombra para quien no se sepa el
+     código de colores. */
+  .historial-area { color: var(--ink-faint); font-size: 0.8rem; margin-left: 0.35rem; }
 
   /* Pantalla de configuración de la institución. Cada ajuste es un bloque con
      su propio ritmo etiqueta → control → ayuda, separado por una línea del

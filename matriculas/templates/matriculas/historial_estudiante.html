@@ -1,0 +1,57 @@
+{% extends "matriculas/base.html" %}
+
+{% block title %}Trayectoria de {{ estudiante.nombre_completo }}{% endblock %}
+
+{% block content %}
+<a href="{% url 'panel' %}" class="volver">&larr; Volver al panel</a>
+<h2>Trayectoria</h2>
+
+<div class="carne" style="margin-bottom:1.5rem;">
+  {% if estudiante.foto_perfil %}
+    <img class="carne-foto" style="width:64px;height:64px;" src="{% url 'ver_foto' estudiante.id %}" alt="">
+  {% else %}
+    <div class="carne-foto-vacia" style="width:64px;height:64px;"></div>
+  {% endif %}
+  <div class="carne-datos">
+    <div class="carne-nombre" style="font-size:1.1rem;">{{ estudiante.nombre_completo }}</div>
+    <div class="carne-detalle">Edad: {{ estudiante.edad }} · Teléfono: {{ estudiante.telefono }}</div>
+  </div>
+</div>
+
+{% if not historial %}
+  <p class="vacio">Este estudiante todavía no tiene ninguna matrícula registrada.</p>
+{% else %}
+  {% if resumen.periodos %}
+  <div class="dash-resumen historial-resumen">
+    <div>
+      <span class="dash-stat-num">{{ resumen.periodos }}</span>
+      <span class="dash-stat-label">Periodo{{ resumen.periodos|pluralize }} cursado{{ resumen.periodos|pluralize }}</span>
+    </div>
+    <div>
+      <span class="dash-stat-num">{{ resumen.promotorias }}</span>
+      <span class="dash-stat-label">Promotoría{{ resumen.promotorias|pluralize }}</span>
+    </div>
+    {% if resumen.desde %}
+    <div>
+      <span class="dash-stat-num">{{ resumen.desde.nombre }}</span>
+      <span class="dash-stat-label">Desde</span>
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="vacio">
+    Todavía no ha cursado ningún periodo: lo que sigue son solicitudes sin confirmar o retiradas.
+  </p>
+  {% endif %}
+
+  {% include "matriculas/_historial.html" with modo="personal" %}
+{% endif %}
+
+{% if user.perfil.rol == "administrador" %}
+<p style="margin-top:1.5rem;">
+  <a class="btn btn-secundario btn-sm" href="{% url 'detalle_estudiante' estudiante.id %}">
+    Ver ficha completa
+  </a>
+</p>
+{% endif %}
+{% endblock %}

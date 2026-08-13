@@ -17,6 +17,12 @@
   </div>
 </div>
 
+<p style="margin-top:-0.8rem;">
+  <a class="btn btn-secundario btn-sm" href="{% url 'historial_estudiante' estudiante.id %}">
+    Ver trayectoria
+  </a>
+</p>
+
 <h3>Documento</h3>
 {% if datos_estudiante %}
   <p>Documento de identidad: {{ datos_estudiante.documento_identidad }}</p>

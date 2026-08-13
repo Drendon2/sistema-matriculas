@@ -15,6 +15,7 @@ urlpatterns = [
     path("mis-companeros/", views.mis_companeros, name="mis_companeros"),
     path("panel/", views.panel, name="panel"),
     path("panel/estudiante/<int:perfil_id>/", views.detalle_estudiante, name="detalle_estudiante"),
+    path("panel/estudiante/<int:perfil_id>/historial/", views.historial_estudiante, name="historial_estudiante"),
     path("panel/promotoria/<int:promotoria_id>/grupos/nuevo/", views.panel_grupo_nuevo, name="panel_grupo_nuevo"),
     path("panel/grupos/<int:grupo_id>/editar/", views.panel_grupo_editar, name="panel_grupo_editar"),
     path("panel/grupos/<int:grupo_id>/eliminar/", views.panel_grupo_eliminar, name="panel_grupo_eliminar"),

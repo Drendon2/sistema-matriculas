@@ -1,11 +1,14 @@
-"""Pruebas del límite configurable de promotorías por estudiante y periodo.
+"""Pruebas del límite configurable de promotorías y del historial del estudiante.
 
 El límite dejó de ser una constante de Python (`LIMITE_PROMOTORIAS_POR_PERIODO`)
 y ahora vive en `ConfiguracionInstitucion`, editable desde Gestión →
 Configuración. Eso cambió quién impone la regla: antes bastaba el índice único
 sobre `ranura`, porque había exactamente tantas ranuras como permitía el límite;
 ahora el esquema solo conoce el techo absoluto (`RANURA_MAXIMA_ABSOLUTA`) y la
-regla de negocio la aplica `Matricula.clean()`. Estas pruebas cubren ese cambio.
+regla de negocio la aplica `Matricula.clean()`. Eso cubre `LimiteConfigurableTests`
+y `PantallaConfiguracionTests`.
+
+`HistorialTests` cubre lo otro: la trayectoria del estudiante por periodos.
 """
 
 from datetime import date
@@ -18,7 +21,7 @@ from django.urls import reverse
 from .models import (
     RANURA_MAXIMA_ABSOLUTA,
     Area, ConfiguracionInstitucion, DatosEstudiante, Matricula, Perfil,
-    Periodo, Promotoria,
+    Periodo, Promotoria, historial_por_periodo, resumen_trayectoria,
 )
 
 
@@ -243,3 +246,175 @@ class PantallaConfiguracionTests(TestCase):
         respuesta = self.client.get(reverse("gestion_configuracion"))
 
         self.assertNotEqual(respuesta.status_code, 200)
+
+
+class HistorialTests(TestCase):
+    """Historial de promotorías: el suyo el estudiante, el ajeno el personal.
+
+    Detrás no hay ningún modelo nuevo —`Matricula` ya guarda su periodo y las
+    retiradas no se borran—, así que lo que hay que cubrir es que la consulta
+    agrupe bien, que el resumen cuente lo que dice contar, y que la vista la
+    vea quien debe.
+
+    Fixture: dos periodos (uno terminado y el que está en curso), tres
+    promotorías en dos áreas distintas, y una estudiante.
+    """
+
+    def setUp(self):
+        self.pasado = Periodo.objects.create(
+            nombre="2025-1", fecha_inicio=date(2025, 1, 15), fecha_fin=date(2025, 6, 15),
+        )
+        self.actual = Periodo.objects.create(
+            nombre="2026-1", fecha_inicio=date(2026, 1, 15), fecha_fin=date(2026, 6, 15),
+            activo=True, matriculas_abiertas=True,
+        )
+        musica = Area.objects.create(nombre="Música")
+        teatro = Area.objects.create(nombre="Teatro")
+        self.violin = Promotoria.objects.create(nombre="Violín", area=musica)
+        self.guitarra = Promotoria.objects.create(nombre="Guitarra", area=musica)
+        self.actuacion = Promotoria.objects.create(nombre="Actuación", area=teatro)
+
+        self.usuario = User.objects.create_user(username="ana", password="x")
+        self.ana = Perfil.objects.create(
+            usuario=self.usuario, rol="estudiante", nombre_completo="Ana Ruiz",
+            fecha_nacimiento=date(1995, 3, 4), telefono="3000000000",
+        )
+        DatosEstudiante.objects.create(perfil=self.ana, documento_identidad="123456")
+
+    # -- utilidades ---------------------------------------------------------
+
+    def matricular(self, promotoria, periodo, estado="activa"):
+        matricula = Matricula(
+            estudiante=self.ana, promotoria=promotoria, periodo=periodo, estado=estado,
+        )
+        matricula.full_clean()
+        matricula.save()
+        return matricula
+
+    def crear_profesor(self, username, promotoria=None):
+        """Un profesor, opcionalmente a cargo de una promotoría."""
+        usuario = User.objects.create_user(username=username, password="x")
+        perfil = Perfil.objects.create(
+            usuario=usuario, rol="profesor", nombre_completo=f"Profe {username}",
+            fecha_nacimiento=date(1985, 5, 5), telefono="3000000009",
+        )
+        if promotoria is not None:
+            promotoria.profesor = perfil
+            promotoria.save(update_fields=["profesor"])
+        return perfil
+
+    # -- la consulta --------------------------------------------------------
+
+    def test_agrupa_por_periodo_del_mas_reciente_al_mas_antiguo(self):
+        self.matricular(self.violin, self.pasado)
+        self.matricular(self.guitarra, self.actual)
+
+        historial = historial_por_periodo(self.ana)
+
+        self.assertEqual([b["periodo"] for b in historial], [self.actual, self.pasado])
+        self.assertEqual([b["en_curso"] for b in historial], [True, False])
+
+    def test_un_periodo_con_varias_promotorias_es_un_solo_bloque(self):
+        self.matricular(self.violin, self.pasado)
+        self.matricular(self.actuacion, self.pasado)
+
+        historial = historial_por_periodo(self.ana)
+
+        self.assertEqual(len(historial), 1)
+        self.assertEqual(len(historial[0]["matriculas"]), 2)
+
+    def test_conserva_las_retiradas(self):
+        """Un historial que solo enseña lo que prosperó no sirve para lo que se consulta."""
+        self.matricular(self.violin, self.pasado, estado="retirada")
+
+        historial = historial_por_periodo(self.ana)
+
+        [matricula] = historial[0]["matriculas"]
+        self.assertEqual(matricula.estado, "retirada")
+
+    def test_un_estudiante_sin_matriculas_no_tiene_historial(self):
+        self.assertEqual(historial_por_periodo(self.ana), [])
+
+    def test_el_resumen_solo_cuenta_lo_que_de_verdad_curso(self):
+        """Pendientes y retiradas salen en el detalle, pero no inflan las cifras."""
+        self.matricular(self.violin, self.pasado)
+        self.matricular(self.guitarra, self.pasado, estado="retirada")
+        self.matricular(self.violin, self.actual, estado="pendiente")
+
+        resumen = resumen_trayectoria(self.ana)
+
+        self.assertEqual(resumen["periodos"], 1)
+        self.assertEqual(resumen["promotorias"], 1)
+        self.assertEqual(resumen["desde"], self.pasado)
+
+    def test_el_resumen_no_cuenta_dos_veces_la_misma_promotoria(self):
+        """Dos periodos en Violín son una promotoría cursada, no dos."""
+        self.matricular(self.violin, self.pasado)
+        self.matricular(self.violin, self.actual)
+
+        resumen = resumen_trayectoria(self.ana)
+
+        self.assertEqual(resumen["periodos"], 2)
+        self.assertEqual(resumen["promotorias"], 1)
+
+    # -- quién puede verlo --------------------------------------------------
+
+    def test_un_profesor_ve_la_trayectoria_completa_aunque_sea_de_otra_area(self):
+        """Excepción deliberada al criterio acotado del resto del sistema.
+
+        El profesor de Violín ve que Ana viene de Actuación, que es de otra
+        área y no la dicta él: es el dato que le permite ubicarla en un nivel.
+        """
+        self.matricular(self.actuacion, self.pasado)
+        profesor = self.crear_profesor("profe_violin", promotoria=self.violin)
+        self.client.force_login(profesor.usuario)
+
+        respuesta = self.client.get(reverse("historial_estudiante", args=[self.ana.id]))
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertContains(respuesta, "Actuación")
+
+    def test_un_estudiante_no_ve_la_trayectoria_de_otro(self):
+        otro_usuario = User.objects.create_user(username="beto", password="x")
+        otro = Perfil.objects.create(
+            usuario=otro_usuario, rol="estudiante", nombre_completo="Beto Páez",
+            fecha_nacimiento=date(1996, 7, 7), telefono="3000000003",
+        )
+        self.client.force_login(self.usuario)
+
+        respuesta = self.client.get(reverse("historial_estudiante", args=[otro.id]))
+
+        self.assertNotEqual(respuesta.status_code, 200)
+
+    def test_la_trayectoria_no_filtra_la_encuesta_ni_el_documento(self):
+        """Lo que abre esta pantalla son las promotorías, nada más.
+
+        La copia del documento sigue siendo solo del administrador, así que el
+        enlace para descargarla no puede aparecerle a un profesor.
+        """
+        self.matricular(self.violin, self.actual)
+        profesor = self.crear_profesor("profe_violin", promotoria=self.violin)
+        self.client.force_login(profesor.usuario)
+
+        respuesta = self.client.get(reverse("historial_estudiante", args=[self.ana.id]))
+
+        self.assertNotContains(respuesta, "123456")
+        self.assertNotContains(respuesta, reverse("detalle_estudiante", args=[self.ana.id]))
+
+    # -- lo que ve el estudiante de lo suyo ---------------------------------
+
+    def test_mis_matriculas_agrupa_y_solo_deja_retirarse_del_periodo_en_curso(self):
+        self.matricular(self.violin, self.pasado)
+        self.matricular(self.guitarra, self.actual)
+        self.client.force_login(self.usuario)
+
+        respuesta = self.client.get(reverse("mis_matriculas"))
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(
+            [b["periodo"].nombre for b in respuesta.context["historial"]],
+            ["2026-1", "2025-1"],
+        )
+        # La matrícula del periodo terminado es historial cerrado: un solo botón.
+        self.assertContains(respuesta, "Retirarme", count=1)
+        self.assertContains(respuesta, "Periodo terminado", count=1)

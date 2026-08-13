@@ -894,3 +894,69 @@ def matriculas_renovables(perfil, periodo_actual):
         .exclude(estado="retirada").values_list("promotoria_id", flat=True)
     )
     return periodo_anterior, [m for m in del_ultimo_periodo if m.promotoria_id not in ya_tiene]
+
+
+def historial_por_periodo(perfil):
+    """Todas las matrículas de un estudiante, agrupadas por periodo, del más reciente al más antiguo.
+
+    No hace falta ningún modelo de historial: cada `Matricula` ya guarda su
+    periodo y nunca se borra al terminar (el estudiante que se va queda como
+    "retirada", ver `retirar_matricula`), así que la trayectoria completa ya
+    está en la tabla y esto solo la ordena.
+
+    Incluye a propósito las retiradas y las rechazadas —que también quedan
+    "retirada"—: un historial que solo enseña lo que prosperó no sirve para
+    entender de dónde viene el estudiante, que es justo para lo que se
+    consulta.
+
+    Devuelve [{periodo, matriculas, en_curso}]. `en_curso` marca el periodo
+    activo para que la plantilla separe lo vigente del pasado sin volver a
+    consultarlo, y para que solo ahí se ofrezcan acciones: un periodo
+    terminado es historial cerrado.
+    """
+    periodo_actual = Periodo.en_curso()
+    matriculas = (
+        Matricula.objects.filter(estudiante=perfil)
+        .select_related(
+            "periodo", "promotoria", "promotoria__area", "promotoria__profesor", "grupo",
+        )
+        # El id del periodo desempata para que las filas de un mismo periodo
+        # queden contiguas aunque dos periodos compartan fecha de inicio; si se
+        # intercalaran, el agrupado de abajo abriría dos bloques para uno solo.
+        .order_by(
+            "-periodo__fecha_inicio", "-periodo_id",
+            "promotoria__area__nombre", "promotoria__nombre",
+        )
+    )
+
+    bloques = []
+    for matricula in matriculas:
+        if not bloques or bloques[-1]["periodo"].id != matricula.periodo_id:
+            bloques.append({
+                "periodo": matricula.periodo,
+                "matriculas": [],
+                "en_curso": periodo_actual is not None and matricula.periodo_id == periodo_actual.id,
+            })
+        bloques[-1]["matriculas"].append(matricula)
+    return bloques
+
+
+def resumen_trayectoria(perfil):
+    """Cifras de cabecera del historial: cuánto lleva el estudiante y cuánto ha cursado.
+
+    Solo cuentan las matrículas ACTIVAS, es decir las que un profesor confirmó:
+    eso es lo que el estudiante realmente cursó. Las pendientes y las retiradas
+    siguen apareciendo en el detalle del historial, pero no inflan estas cifras
+    —si contaran, quien pidió cinco promotorías y no entró a ninguna se leería
+    como el estudiante más veterano de la casa.
+    """
+    activas = Matricula.objects.filter(estudiante=perfil, estado="activa")
+    return {
+        "periodos": activas.values("periodo_id").distinct().count(),
+        "promotorias": activas.values("promotoria_id").distinct().count(),
+        "desde": (
+            Periodo.objects.filter(
+                matriculas__estudiante=perfil, matriculas__estado="activa",
+            ).order_by("fecha_inicio").first()
+        ),
+    }

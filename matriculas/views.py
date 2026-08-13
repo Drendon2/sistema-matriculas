@@ -24,7 +24,8 @@ from .forms import (
 from .models import (
     Acudiente, ConfiguracionInstitucion, CupoPromotoria, DatosEstudiante,
     EncuestaSatisfaccion, Grupo, Matricula, Perfil, Periodo, Promotoria,
-    limite_promotorias, matriculas_renovables,
+    historial_por_periodo, limite_promotorias, matriculas_renovables,
+    resumen_trayectoria,
 )
 
 ROLES_PANEL = ("profesor", "director", "administrador")
@@ -496,13 +497,19 @@ def renovar_matricula(request):
 
 @requiere_rol("estudiante")
 def mis_matriculas(request):
-    matriculas = Matricula.objects.filter(estudiante=request.perfil).select_related(
-        "promotoria", "grupo", "periodo"
-    ).order_by("-fecha")
+    """El historial del estudiante: en qué promotorías está y en cuáles estuvo.
+
+    Va agrupado por periodo y no como una lista plana por fecha, porque el
+    periodo es la unidad en la que el estudiante piensa su paso por la casa
+    ("el semestre pasado hice guitarra") y porque es lo que separa lo vigente
+    —donde todavía puede retirarse— del historial ya cerrado.
+    """
+    perfil = request.perfil
     periodo = Periodo.en_curso()
 
     return render(request, "matriculas/mis_matriculas.html", {
-        "matriculas": matriculas,
+        "historial": historial_por_periodo(perfil),
+        "resumen": resumen_trayectoria(perfil),
         # Sin esto la plantilla no puede distinguir el periodo en curso de uno
         # terminado, y ofrecería "Retirarme" en matrículas ya cerradas.
         "periodo_actual_id": periodo.id if periodo else None,
@@ -861,11 +868,39 @@ def panel_asignar_grupo(request, matricula_id):
     return redirect("panel")
 
 
+@requiere_rol(*ROLES_PANEL)
+def historial_estudiante(request, perfil_id):
+    """Trayectoria de un estudiante: en qué promotorías ha estado y en cuáles sigue.
+
+    La ve el personal completo (profesor, director y administrador), y muestra
+    el historial ENTERO: todas las promotorías del estudiante, no solo las de
+    quien consulta.
+
+    Eso último es una excepción deliberada al criterio acotado que sigue el
+    resto del sistema —el profesor ve el acudiente solo de SUS promotorías, ver
+    el recordatorio de visibilidad en models.py— y se decidió así porque el
+    dato es justamente el que hace falta para ubicar a alguien en un nivel:
+    saber que lleva tres periodos en Danza le sirve al profesor de Teatro que
+    lo recibe por primera vez. No abre nada más: la encuesta demográfica y la
+    copia del documento siguen siendo solo del administrador, en
+    `detalle_estudiante`.
+    """
+    estudiante = get_object_or_404(Perfil, pk=perfil_id, rol="estudiante")
+
+    return render(request, "matriculas/historial_estudiante.html", {
+        "estudiante": estudiante,
+        "historial": historial_por_periodo(estudiante),
+        "resumen": resumen_trayectoria(estudiante),
+    })
+
+
 @requiere_rol("administrador")
 def detalle_estudiante(request, perfil_id):
     """Ficha completa de un estudiante: encuesta demográfica y documento.
 
-    Solo el administrador puede ver esto (ver docstring de models.py).
+    Solo el administrador puede ver esto (ver docstring de models.py). La
+    trayectoria por promotorías no se repite aquí: vive en
+    `historial_estudiante`, que sí ve todo el personal.
     """
     estudiante = get_object_or_404(Perfil, pk=perfil_id, rol="estudiante")
     datos_estudiante = getattr(estudiante, "datos_estudiante", None)

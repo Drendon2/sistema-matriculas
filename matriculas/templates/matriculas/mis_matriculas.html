@@ -5,47 +5,28 @@
 {% block content %}
 <h2>Mis matrículas</h2>
 
-{% if not matriculas %}
+{% if not historial %}
   <p class="vacio">Todavía no tienes matrículas.</p>
 {% else %}
-<table>
-  <thead>
-    <tr>
-      <th>Promotoría</th>
-      <th>Grupo</th>
-      <th>Periodo</th>
-      <th>Fecha</th>
-      <th>Estado</th>
-      <th></th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for matricula in matriculas %}
-    <tr>
-      <td>{{ matricula.promotoria.nombre }}</td>
-      <td>
-        {% if matricula.grupo %}
-          {{ matricula.grupo.get_nivel_display }} · {{ matricula.grupo.horario }}
-        {% else %}
-          <span class="vacio">Por asignar</span>
-        {% endif %}
-      </td>
-      <td>{{ matricula.periodo.nombre }}</td>
-      <td>{{ matricula.fecha|date:"d/m/Y H:i" }}</td>
-      <td><span class="estado estado-{{ matricula.estado }}">{{ matricula.get_estado_display }}</span></td>
-      <td>
-        {% if matricula.periodo_id != periodo_actual_id %}
-          <span class="periodo-terminado">Periodo terminado</span>
-        {% elif matricula.estado == "activa" or matricula.estado == "pendiente" %}
-        <form action="{% url 'retirar_matricula' matricula.id %}" method="post">
-          {% csrf_token %}
-          <button type="submit" class="btn btn-retirar">Retirarme</button>
-        </form>
-        {% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+  {% if resumen.periodos %}
+  <div class="dash-resumen historial-resumen">
+    <div>
+      <span class="dash-stat-num">{{ resumen.periodos }}</span>
+      <span class="dash-stat-label">Periodo{{ resumen.periodos|pluralize }} cursado{{ resumen.periodos|pluralize }}</span>
+    </div>
+    <div>
+      <span class="dash-stat-num">{{ resumen.promotorias }}</span>
+      <span class="dash-stat-label">Promotoría{{ resumen.promotorias|pluralize }}</span>
+    </div>
+    {% if resumen.desde %}
+    <div>
+      <span class="dash-stat-num">{{ resumen.desde.nombre }}</span>
+      <span class="dash-stat-label">Desde</span>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% include "matriculas/_historial.html" with modo="estudiante" %}
 {% endif %}
 {% endblock %}
