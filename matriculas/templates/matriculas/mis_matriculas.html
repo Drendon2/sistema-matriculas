@@ -1,0 +1,51 @@
+{% extends "matriculas/base.html" %}
+
+{% block title %}Mis matrículas{% endblock %}
+
+{% block content %}
+<h2>Mis matrículas</h2>
+
+{% if not matriculas %}
+  <p class="vacio">Todavía no tienes matrículas.</p>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th>Promotoría</th>
+      <th>Grupo</th>
+      <th>Periodo</th>
+      <th>Fecha</th>
+      <th>Estado</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for matricula in matriculas %}
+    <tr>
+      <td>{{ matricula.promotoria.nombre }}</td>
+      <td>
+        {% if matricula.grupo %}
+          {{ matricula.grupo.get_nivel_display }} · {{ matricula.grupo.horario }}
+        {% else %}
+          <span class="vacio">Por asignar</span>
+        {% endif %}
+      </td>
+      <td>{{ matricula.periodo.nombre }}</td>
+      <td>{{ matricula.fecha|date:"d/m/Y H:i" }}</td>
+      <td><span class="estado estado-{{ matricula.estado }}">{{ matricula.get_estado_display }}</span></td>
+      <td>
+        {% if matricula.periodo_id != periodo_actual_id %}
+          <span class="periodo-terminado">Periodo terminado</span>
+        {% elif matricula.estado == "activa" or matricula.estado == "pendiente" %}
+        <form action="{% url 'retirar_matricula' matricula.id %}" method="post">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-retirar">Retirarme</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

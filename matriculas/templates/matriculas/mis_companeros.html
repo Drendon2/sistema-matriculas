@@ -1,0 +1,34 @@
+{% extends "matriculas/base.html" %}
+
+{% block title %}Mis compañeros{% endblock %}
+
+{% block content %}
+<h2>Mis compañeros</h2>
+
+{% if not promotorias %}
+  <p class="vacio">No estás matriculado en ninguna promotoría por ahora.</p>
+{% else %}
+  {% for item in promotorias %}
+  <h3>{{ item.promotoria.nombre }}</h3>
+  {% if not item.companeros %}
+    <p class="vacio">Todavía no tienes compañeros en esta promotoría.</p>
+  {% else %}
+  <div style="display:flex;flex-direction:column;gap:0.6rem;">
+    {% for companero in item.companeros %}
+    <div class="carne">
+      {% if companero.foto_perfil %}
+        <img class="carne-foto" src="{% url 'ver_foto' companero.id %}" alt="">
+      {% else %}
+        <div class="carne-foto-vacia"></div>
+      {% endif %}
+      <div class="carne-datos">
+        <div class="carne-nombre">{{ companero.nombre_completo }}</div>
+        <div class="carne-detalle">{{ item.promotoria.nombre }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endfor %}
+{% endif %}
+{% endblock %}

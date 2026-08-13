@@ -1,0 +1,224 @@
+{% extends "matriculas/base_publico.html" %}
+
+{% block title %}Inscripción — {{ configuracion.nombre_institucion }}{% endblock %}
+{% block ancho %}440px{% endblock %}
+
+{% block caja %}
+  <h1>Inscripción de estudiante</h1>
+  <p class="info">
+    {% if periodo and matriculas_abiertas %}
+      Crea tu cuenta y quedas inscrito para el periodo <strong>{{ periodo.nombre }}</strong>.
+      El profesor debe confirmar tu inscripción antes de asignarte un grupo.
+    {% elif periodo %}
+      Las matrículas de <strong>{{ periodo.nombre }}</strong> están cerradas en este momento.
+      {{ configuracion.nombre_institucion }} recibe inscripciones solo al principio y a mitad de año.
+    {% else %}
+      No hay un periodo de matrícula activo en este momento.
+    {% endif %}
+  </p>
+
+  {% if periodo and not matriculas_abiertas %}
+  <p class="aviso">
+    Si ya estudiaste aquí antes, no tienes que inscribirte de nuevo: cuando se abran las
+    matrículas podrás renovar desde tu cuenta.
+  </p>
+  {% endif %}
+
+  {% if messages %}
+  <ul class="messages">
+    {% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if periodo and matriculas_abiertas %}
+  <form method="post">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+
+    <fieldset>
+      <legend>Cuenta</legend>
+      <label for="{{ form.username.id_for_label }}">{{ form.username.label }}</label>
+      {{ form.username }}{{ form.username.errors }}
+      <label for="{{ form.password.id_for_label }}">{{ form.password.label }}</label>
+      {{ form.password }}{{ form.password.errors }}
+      <label for="{{ form.password2.id_for_label }}">{{ form.password2.label }}</label>
+      {{ form.password2 }}{{ form.password2.errors }}
+    </fieldset>
+
+    <fieldset>
+      <legend>Datos personales</legend>
+      <label for="{{ form.nombre_completo.id_for_label }}">{{ form.nombre_completo.label }}</label>
+      {{ form.nombre_completo }}{{ form.nombre_completo.errors }}
+      <label for="{{ form.fecha_nacimiento.id_for_label }}">{{ form.fecha_nacimiento.label }}</label>
+      {{ form.fecha_nacimiento }}{{ form.fecha_nacimiento.errors }}
+      <label for="{{ form.telefono.id_for_label }}">{{ form.telefono.label }}</label>
+      {{ form.telefono }}{{ form.telefono.errors }}
+    </fieldset>
+
+    <fieldset>
+      <legend>Documento</legend>
+      <label for="{{ form.documento_identidad.id_for_label }}">{{ form.documento_identidad.label }}</label>
+      {{ form.documento_identidad }}{{ form.documento_identidad.errors }}
+      <p class="aviso">Por seguridad, aquí no se sube ningún archivo: una vez creada tu cuenta, inicia sesión y ve a "Mi perfil" para subir tu foto y la copia de tu documento de identidad. Eso no retrasa que el profesor confirme tu inscripción.</p>
+    </fieldset>
+
+    <fieldset class="campo-condicional" id="fieldset-acudiente">
+      <legend>Acudiente (obligatorio si eres menor de edad)</legend>
+      <p class="campo-condicional-nota" id="acudiente-nota" aria-live="polite">Se activa automáticamente si tu fecha de nacimiento indica que eres menor de edad.</p>
+      <label for="{{ form.acudiente_nombre.id_for_label }}">{{ form.acudiente_nombre.label }} <span class="campo-requerido" id="acudiente-nombre-requerido" hidden>*</span></label>
+      {{ form.acudiente_nombre }}{{ form.acudiente_nombre.errors }}
+      <label for="{{ form.acudiente_telefono.id_for_label }}">{{ form.acudiente_telefono.label }}</label>
+      {{ form.acudiente_telefono }}{{ form.acudiente_telefono.errors }}
+    </fieldset>
+
+    <fieldset class="promotorias" id="promotorias">
+      <legend>Tus promotorías</legend>
+      <p class="promo-nota">
+        {% if form.limite == 1 %}
+          Este periodo puedes inscribirte en <strong>una promotoría</strong>.
+        {% else %}
+          Puedes inscribirte en hasta <strong>{{ form.limite }} promotorías</strong> este periodo.
+          Empieza por la principal y añade las demás si quieres.
+        {% endif %}
+      </p>
+
+      {% for campo in form.campos_promotoria %}
+      <div class="promo-campo{% if not forloop.first %} promo-extra{% endif %}"{% if not forloop.first and not campo.value %} hidden{% endif %}>
+        <label for="{{ campo.id_for_label }}">
+          {% if forloop.first %}Promotoría principal{% else %}Promotoría {{ forloop.counter }} <span class="promo-opcional">opcional</span>{% endif %}
+        </label>
+        {{ campo }}
+        {{ campo.errors }}
+        {% if not forloop.first %}<button type="button" class="promo-quitar">Quitar este cupo</button>{% endif %}
+      </div>
+      {% endfor %}
+
+      {% if form.limite > 1 %}
+      <button type="button" class="promo-anadir">+ Añadir otra promotoría</button>
+      {% endif %}
+
+      <p class="promo-contador"><span data-cuenta>0 de {{ form.limite }}</span> cupos usados</p>
+
+      <button type="submit">Crear cuenta e inscribirme</button>
+
+      <script>
+        (function () {
+          var raiz = document.getElementById("promotorias");
+          if (!raiz) { return; }
+          var selects = Array.prototype.slice.call(raiz.querySelectorAll("select"));
+          var extras = Array.prototype.slice.call(raiz.querySelectorAll(".promo-extra"));
+          var anadir = raiz.querySelector(".promo-anadir");
+          var cuenta = raiz.querySelector("[data-cuenta]");
+          var limite = selects.length;
+          if (!limite || !cuenta) { return; }
+
+          function visible(campo) { return !campo.hasAttribute("hidden"); }
+
+          function actualizar() {
+            // Un cupo oculto no cuenta aunque conserve valor.
+            var usados = selects.filter(function (s) {
+              var campo = s.closest(".promo-campo");
+              return s.value && (!campo || visible(campo));
+            }).length;
+            cuenta.textContent = usados + " de " + limite;
+
+            // La misma promotoría no puede ocupar dos cupos.
+            var tomadas = selects.filter(function (s) { return s.value; })
+              .map(function (s) { return s.value; });
+            selects.forEach(function (s) {
+              Array.prototype.forEach.call(s.options, function (o) {
+                o.disabled = o.value !== "" && o.value !== s.value && tomadas.indexOf(o.value) !== -1;
+              });
+            });
+
+            // El botón desaparece cuando ya no queda ningún cupo por abrir.
+            if (anadir) {
+              anadir.hidden = !extras.some(function (c) { return !visible(c); });
+            }
+          }
+
+          if (anadir) {
+            anadir.addEventListener("click", function () {
+              for (var i = 0; i < extras.length; i++) {
+                if (!visible(extras[i])) {
+                  extras[i].removeAttribute("hidden");
+                  var s = extras[i].querySelector("select");
+                  actualizar();
+                  if (s) { s.focus(); }
+                  return;
+                }
+              }
+            });
+          }
+
+          raiz.addEventListener("click", function (evento) {
+            var boton = evento.target.closest(".promo-quitar");
+            if (!boton || !raiz.contains(boton)) { return; }
+            var campo = boton.closest(".promo-campo");
+            var s = campo.querySelector("select");
+            if (s) { s.value = ""; }
+            campo.setAttribute("hidden", "");
+            actualizar();
+            if (anadir && !anadir.hidden) { anadir.focus(); }
+          });
+
+          raiz.addEventListener("change", function (evento) {
+            if (evento.target.tagName === "SELECT") { actualizar(); }
+          });
+
+          actualizar();
+        })();
+      </script>
+    </fieldset>
+  </form>
+
+  <script>
+    (function () {
+      var fecha = document.getElementById("{{ form.fecha_nacimiento.id_for_label }}");
+      var fieldset = document.getElementById("fieldset-acudiente");
+      var nota = document.getElementById("acudiente-nota");
+      var nombre = document.getElementById("{{ form.acudiente_nombre.id_for_label }}");
+      var marcaRequerido = document.getElementById("acudiente-nombre-requerido");
+      if (!fecha || !fieldset || !nota || !nombre || !marcaRequerido) { return; }
+
+      function esMenorDeEdad(valorIso) {
+        var partes = valorIso.split("-");
+        if (partes.length !== 3) { return null; }
+        var nacimiento = new Date(Number(partes[0]), Number(partes[1]) - 1, Number(partes[2]));
+        if (isNaN(nacimiento.getTime())) { return null; }
+        var hoy = new Date();
+        var edad = hoy.getFullYear() - nacimiento.getFullYear();
+        var cumpleañosNoLlega = hoy.getMonth() < nacimiento.getMonth() ||
+          (hoy.getMonth() === nacimiento.getMonth() && hoy.getDate() < nacimiento.getDate());
+        if (cumpleañosNoLlega) { edad -= 1; }
+        return edad < 18;
+      }
+
+      function actualizar() {
+        var menor = esMenorDeEdad(fecha.value);
+        if (menor) {
+          fieldset.dataset.activo = "true";
+          nota.textContent = "Obligatorio: tu fecha de nacimiento indica que eres menor de edad.";
+          nombre.required = true;
+          nombre.setAttribute("aria-required", "true");
+          marcaRequerido.hidden = false;
+        } else {
+          fieldset.dataset.activo = "false";
+          nota.textContent = menor === null
+            ? "Se activa automáticamente si tu fecha de nacimiento indica que eres menor de edad."
+            : "No es obligatorio: tu fecha de nacimiento indica que eres mayor de edad.";
+          nombre.required = false;
+          nombre.setAttribute("aria-required", "false");
+          marcaRequerido.hidden = true;
+        }
+      }
+
+      fecha.addEventListener("change", actualizar);
+      fecha.addEventListener("input", actualizar);
+      actualizar();
+    })();
+  </script>
+  {% endif %}
+
+  <p class="enlace-pie"><a href="{% url 'login' %}">Ya tengo cuenta, iniciar sesión</a></p>
+{% endblock %}

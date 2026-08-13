@@ -1,0 +1,182 @@
+<p class="campo-info" style="margin-top:-0.6rem;">Profesor: {{ item.promotoria.profesor.nombre_completo|default:"Sin asignar" }}</p>
+
+{% if periodo %}
+<div class="cupo-fila">
+  <span class="cupo-etiqueta">Cupo en {{ periodo.nombre }}</span>
+  {% if item.cupo is None %}
+    <span class="cupo-cifra cupo-cifra-libre">Sin tope</span>
+  {% else %}
+    <span class="cupo-cifra{% if item.ocupados >= item.cupo %} cupo-cifra-lleno{% endif %}">{{ item.ocupados }} / {{ item.cupo }}</span>
+  {% endif %}
+  {% if item.puede_gestionar %}
+  <form action="{% url 'panel_cupo_promotoria' item.promotoria.id %}" method="post" class="cupo-form">
+    {% csrf_token %}
+    <label class="cupo-form-label" for="cupo-{{ item.promotoria.id }}">Cambiar a</label>
+    <input type="number" id="cupo-{{ item.promotoria.id }}" name="cupo_maximo" min="0" step="1"
+           value="{{ item.cupo|default_if_none:'' }}" placeholder="sin tope">
+    <button type="submit" class="btn btn-sm">Guardar</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if item.puede_gestionar %}
+<p><a class="btn btn-sm" href="{% url 'panel_grupo_nuevo' item.promotoria.id %}">+ Nuevo grupo</a></p>
+{% endif %}
+
+<h4>Pendientes de confirmación{% if item.pendientes %} ({{ item.pendientes|length }}){% endif %}</h4>
+{% if not item.pendientes %}
+  <p class="vacio">No hay solicitudes pendientes.</p>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th></th><th>Nombre</th><th>Trayectoria</th><th>Edad</th><th>Teléfono</th><th>Acudiente</th>
+      {% if item.puede_gestionar %}<th></th>{% endif %}
+      {% if user.perfil.rol == "administrador" %}<th></th>{% endif %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for e in item.pendientes %}
+    <tr>
+      <td>{% if e.perfil.foto_perfil %}<img class="foto-mini" src="{% url 'ver_foto' e.perfil.id %}" alt="">{% endif %}</td>
+      <td>{{ e.perfil.nombre_completo }}</td>
+      <td>
+        {% if e.renovacion %}
+          <span class="trayectoria trayectoria-renovacion">Renovación</span>
+        {% else %}
+          <span class="trayectoria trayectoria-nuevo">Nuevo aquí</span>
+        {% endif %}
+      </td>
+      <td>{{ e.perfil.edad }}</td>
+      <td>{{ e.perfil.telefono }}</td>
+      <td>
+        {% if e.acudiente %}{{ e.acudiente.nombre }} ({{ e.acudiente.telefono }}){% else %}<span class="vacio">—</span>{% endif %}
+      </td>
+      {% if item.puede_gestionar %}
+      <td>
+        <span class="accion-fila">
+        <form action="{% url 'panel_confirmar_matricula' e.matricula.id %}" method="post" style="display:inline;">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-sm">Confirmar</button>
+        </form>
+        <form action="{% url 'panel_rechazar_matricula' e.matricula.id %}" method="post" style="display:inline;">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-retirar btn-sm">Rechazar</button>
+        </form>
+        </span>
+      </td>
+      {% endif %}
+      {% if user.perfil.rol == "administrador" %}
+      <td><a href="{% url 'detalle_estudiante' e.perfil.id %}">Ver detalle</a></td>
+      {% endif %}
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% for g in item.grupos %}
+  <div class="grupo-cabecera">
+    <h4 style="margin:1.2rem 0 0.4rem;">
+      {{ g.grupo.get_nivel_display }} · {{ g.grupo.horario }} · Salón {{ g.grupo.salon }}
+      ({{ g.estudiantes|length }}/{{ g.grupo.cupo_maximo }})
+    </h4>
+    {% if item.puede_gestionar %}
+    <span class="acciones">
+      <a href="{% url 'panel_grupo_editar' g.grupo.id %}">editar</a>
+      <form action="{% url 'panel_grupo_eliminar' g.grupo.id %}" method="post" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" class="btn-texto">eliminar</button>
+      </form>
+    </span>
+    {% endif %}
+  </div>
+  {% if not g.estudiantes %}
+    <p class="vacio">Sin estudiantes en este grupo.</p>
+  {% else %}
+  <table>
+    <thead>
+      <tr>
+        <th></th><th>Nombre</th><th>Edad</th><th>Teléfono</th><th>Acudiente</th>
+        {% if item.puede_gestionar %}<th></th>{% endif %}
+        {% if user.perfil.rol == "administrador" %}<th></th>{% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in g.estudiantes %}
+      <tr>
+        <td>{% if e.perfil.foto_perfil %}<img class="foto-mini" src="{% url 'ver_foto' e.perfil.id %}" alt="">{% endif %}</td>
+        <td>{{ e.perfil.nombre_completo }}</td>
+        <td>{{ e.perfil.edad }}</td>
+        <td>{{ e.perfil.telefono }}</td>
+        <td>
+          {% if e.acudiente %}{{ e.acudiente.nombre }} ({{ e.acudiente.telefono }}){% else %}<span class="vacio">—</span>{% endif %}
+        </td>
+        {% if item.puede_gestionar %}
+        <td>
+          <form action="{% url 'panel_asignar_grupo' e.matricula.id %}" method="post">
+            {% csrf_token %}
+            <input type="hidden" name="grupo_id" value="">
+            <button type="submit" class="btn btn-retirar btn-sm">Quitar del grupo</button>
+          </form>
+        </td>
+        {% endif %}
+        {% if user.perfil.rol == "administrador" %}
+        <td><a href="{% url 'detalle_estudiante' e.perfil.id %}">Ver detalle</a></td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+{% endfor %}
+
+<h4>Sin grupo asignado</h4>
+{% if not item.sin_grupo %}
+  <p class="vacio">Todos los matriculados ya tienen grupo.</p>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th></th><th>Nombre</th><th>Edad</th><th>Teléfono</th><th>Acudiente</th>
+      {% if item.puede_gestionar %}<th>Asignar a</th>{% endif %}
+      {% if user.perfil.rol == "administrador" %}<th></th>{% endif %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for e in item.sin_grupo %}
+    <tr>
+      <td>{% if e.perfil.foto_perfil %}<img class="foto-mini" src="{% url 'ver_foto' e.perfil.id %}" alt="">{% endif %}</td>
+      <td>{{ e.perfil.nombre_completo }}</td>
+      <td>{{ e.perfil.edad }}</td>
+      <td>{{ e.perfil.telefono }}</td>
+      <td>
+        {% if e.acudiente %}{{ e.acudiente.nombre }} ({{ e.acudiente.telefono }}){% else %}<span class="vacio">—</span>{% endif %}
+      </td>
+      {% if item.puede_gestionar %}
+      <td>
+        {% if item.grupos %}
+        <form action="{% url 'panel_asignar_grupo' e.matricula.id %}" method="post" style="display:flex;gap:0.4rem;">
+          {% csrf_token %}
+          <select name="grupo_id" style="width:auto;">
+            <option value="">-- elegir grupo --</option>
+            {% for g in item.grupos %}
+              <option value="{{ g.grupo.id }}">{{ g.grupo.get_nivel_display }} · {{ g.grupo.horario }} ({{ g.estudiantes|length }}/{{ g.grupo.cupo_maximo }})</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="btn btn-sm">Asignar</button>
+        </form>
+        {% else %}
+          <span class="vacio">Crea un grupo primero</span>
+        {% endif %}
+      </td>
+      {% endif %}
+      {% if user.perfil.rol == "administrador" %}
+      <td><a href="{% url 'detalle_estudiante' e.perfil.id %}">Ver detalle</a></td>
+      {% endif %}
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}

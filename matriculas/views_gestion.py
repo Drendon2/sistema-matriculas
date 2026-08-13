@@ -1,0 +1,798 @@
+from django.contrib import messages
+from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
+from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
+from django.db.models import Count, Q
+from django.db.models.deletion import ProtectedError
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse, reverse_lazy
+from django.views.generic import CreateView, DeleteView, ListView, TemplateView, UpdateView
+
+from .forms import ConfiguracionInstitucionForm, UsuarioForm
+from .models import (
+    Acudiente, Area, ConfiguracionInstitucion, CupoPromotoria, DatosEstudiante,
+    EncuestaDemografica, Grupo, Matricula, Perfil, Periodo, Promotoria,
+)
+from .views import _ficha_estudiante, requiere_rol
+
+ROLES_GESTION = ("director", "administrador")
+
+
+class RolGestionRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
+    """Solo director/administrador pueden gestionar el catálogo académico."""
+
+    def test_func(self):
+        perfil = getattr(self.request.user, "perfil", None)
+        return perfil is not None and perfil.rol in ROLES_GESTION
+
+    def handle_no_permission(self):
+        if self.request.user.is_authenticated:
+            messages.error(self.request, "No tienes acceso a esta sección.")
+            return redirect("post_login_redirect")
+        return super().handle_no_permission()
+
+
+class BorradoProtegidoMixin:
+    """Convierte un ProtectedError (hay registros dependientes) en un mensaje amable."""
+
+    def form_valid(self, form):
+        try:
+            return super().form_valid(form)
+        except ProtectedError:
+            messages.error(
+                self.request,
+                f"No se puede eliminar «{self.object}»: hay otros registros que dependen de él "
+                "(por ejemplo grupos o matrículas asociadas).",
+            )
+            return redirect(self.success_url)
+
+
+class GestionInicioView(RolGestionRequiredMixin, TemplateView):
+    template_name = "matriculas/gestion_inicio.html"
+
+
+@requiere_rol("administrador")
+def configuracion_institucion(request):
+    """Ajustes de la institución: la marca y el límite de promotorías por periodo.
+
+    Solo administrador: no es catálogo académico (que sí comparte con el
+    director), es la identidad de toda la entidad y una regla que gobierna las
+    matrículas de todo el mundo.
+    """
+    configuracion = ConfiguracionInstitucion.actual()
+
+    if request.method == "POST":
+        form = ConfiguracionInstitucionForm(request.POST, request.FILES, instance=configuracion)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Configuración de la institución actualizada.")
+            # El contraste no bloquea: una marca clara puede ser legítima, pero
+            # el texto blanco de los botones deja de leerse y hay que avisarlo.
+            razon = form.instance.contraste_texto_boton
+            if razon < 4.5:
+                messages.error(
+                    request,
+                    f"Ojo: el texto blanco sobre ese color de acento queda en {razon:.1f}:1 de "
+                    "contraste, por debajo del mínimo de 4.5:1. Los botones serán difíciles de "
+                    "leer; considera un tono más oscuro.",
+                )
+            return redirect("gestion_configuracion")
+    else:
+        form = ConfiguracionInstitucionForm(instance=configuracion)
+
+    return render(request, "matriculas/gestion_configuracion.html", {
+        "form": form,
+        "configuracion": configuracion,
+    })
+
+
+@requiere_rol(*ROLES_GESTION)
+def ventana_matriculas(request):
+    """Iniciar y finalizar las matrículas del periodo en curso.
+
+    La Casa de la Cultura no recibe gente todo el año: abre al principio y a
+    mitad. Este interruptor es lo que separa "el periodo está en curso" de "se
+    admiten inscripciones y renovaciones ahora mismo".
+    """
+    periodo = Periodo.en_curso()
+
+    if request.method == "POST" and request.POST.get("accion") == "poner_en_curso":
+        elegido = get_object_or_404(Periodo, pk=request.POST.get("periodo_id"))
+        anterior = periodo
+        Periodo.poner_en_curso(elegido)
+        if anterior is not None and anterior.pk != elegido.pk:
+            messages.success(
+                request,
+                f"{elegido} es ahora el periodo en curso. {anterior} dejó de estarlo y sus "
+                "matrículas quedaron cerradas.",
+            )
+        else:
+            messages.success(request, f"{elegido} es ahora el periodo en curso.")
+        return redirect("gestion_matriculas")
+
+    if request.method == "POST":
+        if periodo is None:
+            messages.error(
+                request,
+                "No hay un periodo en curso. Elige cuál es antes de abrir matrículas.",
+            )
+            return redirect("gestion_matriculas")
+
+        abrir = request.POST.get("accion") == "abrir"
+        periodo.matriculas_abiertas = abrir
+        periodo.save(update_fields=["matriculas_abiertas"])
+        if abrir:
+            messages.success(
+                request,
+                f"Matrículas de {periodo} ABIERTAS. Los estudiantes nuevos ya pueden "
+                "inscribirse y los antiguos renovar.",
+            )
+        else:
+            messages.success(
+                request,
+                f"Matrículas de {periodo} CERRADAS. Las matrículas ya registradas no se "
+                "tocan; solo deja de entrar gente nueva.",
+            )
+        return redirect("gestion_matriculas")
+
+    resumen = None
+    if periodo is not None:
+        matriculas = Matricula.objects.filter(periodo=periodo)
+        anteriores = Periodo.objects.filter(fecha_inicio__lt=periodo.fecha_inicio).order_by(
+            "-fecha_inicio"
+        ).first()
+        por_renovar = 0
+        if anteriores is not None:
+            ya_en_curso = set(
+                matriculas.exclude(estado="retirada").values_list("estudiante_id", flat=True)
+            )
+            por_renovar = (
+                Matricula.objects.filter(periodo=anteriores, estado="activa")
+                .exclude(estudiante_id__in=ya_en_curso)
+                .values("estudiante").distinct().count()
+            )
+        resumen = {
+            "pendientes": matriculas.filter(estado="pendiente").count(),
+            "activas": matriculas.filter(estado="activa").count(),
+            "estudiantes": matriculas.exclude(estado="retirada").values("estudiante").distinct().count(),
+            "periodo_anterior": anteriores,
+            "por_renovar": por_renovar,
+        }
+
+    return render(request, "matriculas/gestion_matriculas.html", {
+        "periodo": periodo,
+        "resumen": resumen,
+        "periodos": Periodo.objects.order_by("-fecha_inicio"),
+    })
+
+
+@requiere_rol(*ROLES_GESTION)
+def cupos_periodo(request, periodo_id=None):
+    """Fijar de una vez el cupo de todas las promotorías para un periodo.
+
+    Es la pantalla de "abrir matrículas": se elige el periodo, se reparten los
+    cupos y se guarda todo junto. Dejar una casilla vacía deja esa promotoría
+    sin tope. Los periodos pasados se pueden consultar, pero no editar: su
+    cupo es parte del histórico.
+    """
+    periodos = list(Periodo.objects.order_by("-activo", "-id"))
+    if periodo_id is not None:
+        periodo = get_object_or_404(Periodo, pk=periodo_id)
+    else:
+        periodo = next((p for p in periodos if p.activo), None) or (periodos[0] if periodos else None)
+
+    if periodo is None:
+        return render(request, "matriculas/gestion_cupos.html", {
+            "periodo": None, "periodos": periodos, "filas": [],
+        })
+
+    promotorias = list(
+        Promotoria.objects.select_related("area", "profesor").order_by("area__nombre", "nombre")
+    )
+
+    if request.method == "POST":
+        if not periodo.activo:
+            messages.error(
+                request,
+                f"{periodo} no es el periodo activo: sus cupos son histórico y no se editan.",
+            )
+            return redirect("gestion_cupos_periodo", periodo_id=periodo.pk)
+
+        errores, guardados, quitados, avisos = [], 0, 0, []
+        with transaction.atomic():
+            for promotoria in promotorias:
+                bruto = (request.POST.get(f"cupo_{promotoria.pk}") or "").strip()
+                if bruto == "":
+                    borrados, _ = CupoPromotoria.objects.filter(
+                        promotoria=promotoria, periodo=periodo
+                    ).delete()
+                    quitados += 1 if borrados else 0
+                    continue
+                try:
+                    cupo = int(bruto)
+                except ValueError:
+                    errores.append(f"{promotoria}: «{bruto}» no es un número entero.")
+                    continue
+                if cupo < 0:
+                    errores.append(f"{promotoria}: el cupo no puede ser negativo.")
+                    continue
+
+                CupoPromotoria.objects.update_or_create(
+                    promotoria=promotoria, periodo=periodo, defaults={"cupo_maximo": cupo},
+                )
+                guardados += 1
+                ocupados = promotoria.ocupados_en(periodo)
+                if cupo < ocupados:
+                    avisos.append(f"{promotoria}: cupo {cupo} por debajo de las {ocupados} matrículas ya ocupando sitio.")
+
+            if errores:
+                # Nada a medias: si un valor viene mal, no se guarda ninguno.
+                transaction.set_rollback(True)
+
+        if errores:
+            messages.error(request, "No se guardó ningún cupo. " + " ".join(errores))
+        else:
+            messages.success(
+                request,
+                f"Cupos de {periodo} guardados: {guardados} con tope"
+                + (f", {quitados} sin tope" if quitados else "") + ".",
+            )
+            for aviso in avisos:
+                messages.error(request, aviso + " No se retiró a nadie, pero no entrarán estudiantes nuevos.")
+        return redirect("gestion_cupos_periodo", periodo_id=periodo.pk)
+
+    filas = []
+    for promotoria in promotorias:
+        filas.append({
+            "promotoria": promotoria,
+            "cupo": promotoria.cupo_en(periodo),
+            "ocupados": promotoria.ocupados_en(periodo),
+        })
+
+    return render(request, "matriculas/gestion_cupos.html", {
+        "periodo": periodo, "periodos": periodos, "filas": filas,
+    })
+
+
+def _con_porcentaje(filas, campo="total"):
+    """Agrega 'porcentaje' (ancho de barra 0-100, relativo al valor más alto de la lista)."""
+    filas = list(filas)
+    maximo = max((f[campo] for f in filas), default=0)
+    for f in filas:
+        f["porcentaje"] = round((f[campo] / maximo) * 100) if maximo else 0
+    return filas
+
+
+def _top5_texto_libre(encuesta_qs, campo):
+    """Los 5 valores más repetidos de un campo de texto libre de la encuesta (excluye vacíos)."""
+    filas = [
+        {"etiqueta": fila[campo], "total": fila["total"]}
+        for fila in encuesta_qs.exclude(**{campo: ""}).values(campo).annotate(total=Count("id")).order_by("-total")[:5]
+    ]
+    return _con_porcentaje(filas)
+
+
+@requiere_rol("administrador")
+def estadisticas(request):
+    """Panel de estadísticas — solo administrador (ver visibilidad por rol en models.py):
+    matrícula por departamento/promotoría/periodo, grupos por nivel, y la
+    encuesta demográfica agregada (nunca datos de una persona identificable).
+    """
+    matriculas_activas = Matricula.objects.filter(estado="activa")
+
+    # Árbol Departamento → Promotoría: una sola estructura responde "por
+    # departamento" y "por promotoría" a la vez, en vez de dos listas planas
+    # que repetirían la misma información dos veces.
+    departamentos = {}
+    orden_departamentos = []
+    filas_promotoria = (
+        matriculas_activas
+        .values("promotoria_id", "promotoria__nombre", "promotoria__area_id", "promotoria__area__nombre")
+        .annotate(total=Count("id"))
+        .order_by("promotoria__area__nombre", "-total")
+    )
+    for fila in filas_promotoria:
+        area_id = fila["promotoria__area_id"]
+        if area_id not in departamentos:
+            departamentos[area_id] = {
+                "nombre": fila["promotoria__area__nombre"],
+                "tag_class": f"tag-{area_id % 8}",
+                "total": 0,
+                "promotorias": [],
+            }
+            orden_departamentos.append(area_id)
+        departamentos[area_id]["total"] += fila["total"]
+        departamentos[area_id]["promotorias"].append({
+            "etiqueta": fila["promotoria__nombre"],
+            "total": fila["total"],
+        })
+
+    arbol_departamentos = [departamentos[area_id] for area_id in orden_departamentos]
+    arbol_departamentos.sort(key=lambda d: -d["total"])
+    arbol_departamentos = _con_porcentaje(arbol_departamentos)
+    for departamento in arbol_departamentos:
+        departamento["promotorias"] = _con_porcentaje(departamento["promotorias"])
+
+    nivel_labels = dict(Grupo.NIVELES)
+    grupos_por_curso = _con_porcentaje([
+        {"etiqueta": nivel_labels.get(fila["nivel"], fila["nivel"]), "total": fila["total"]}
+        for fila in Grupo.objects.values("nivel").annotate(total=Count("id")).order_by("nivel")
+    ])
+
+    estudiantes_por_periodo = _con_porcentaje([
+        {"etiqueta": fila["periodo__nombre"], "total": fila["total"]}
+        for fila in matriculas_activas.values("periodo__nombre", "periodo__fecha_inicio")
+            .annotate(total=Count("id")).order_by("-periodo__fecha_inicio")
+    ])
+
+    encuesta_qs = EncuestaDemografica.objects.all()
+    total_encuestas = encuesta_qs.count()
+
+    genero_labels = dict(EncuestaDemografica.GENEROS)
+    genero_stats = _con_porcentaje([
+        {"etiqueta": genero_labels.get(fila["genero"], fila["genero"]), "total": fila["total"]}
+        for fila in encuesta_qs.values("genero").annotate(total=Count("id")).order_by("-total")
+    ])
+
+    estrato_stats = _con_porcentaje([
+        {"etiqueta": f"Estrato {fila['estrato']}", "total": fila["total"]}
+        for fila in encuesta_qs.values("estrato").annotate(total=Count("id")).order_by("estrato")
+    ])
+
+    autoriza_si = encuesta_qs.filter(autoriza_tratamiento_datos=True).count()
+    autoriza_no = total_encuestas - autoriza_si
+    pct_autoriza_si = round((autoriza_si / total_encuestas) * 100) if total_encuestas else 0
+
+    return render(request, "matriculas/gestion_estadisticas.html", {
+        "arbol_departamentos": arbol_departamentos,
+        "grupos_por_curso": grupos_por_curso,
+        "estudiantes_por_periodo": estudiantes_por_periodo,
+        "total_estudiantes_activos": matriculas_activas.values("estudiante").distinct().count(),
+        "total_promotorias": Promotoria.objects.count(),
+        "total_grupos": Grupo.objects.count(),
+        "total_encuestas": total_encuestas,
+        "total_con_rol": Perfil.objects.exclude(rol="").count(),
+        "genero_stats": genero_stats,
+        "estrato_stats": estrato_stats,
+        "autoriza_si": autoriza_si,
+        "autoriza_no": autoriza_no,
+        "pct_autoriza_si": pct_autoriza_si,
+        "pct_autoriza_no": 100 - pct_autoriza_si,
+        "nivel_educativo_top": _top5_texto_libre(encuesta_qs, "nivel_educativo"),
+        "ocupacion_top": _top5_texto_libre(encuesta_qs, "ocupacion"),
+        "grupo_etnico_top": _top5_texto_libre(encuesta_qs, "grupo_etnico"),
+        "discapacidad_top": _top5_texto_libre(encuesta_qs, "discapacidad"),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Área
+# ---------------------------------------------------------------------------
+
+class AreaListView(RolGestionRequiredMixin, ListView):
+    model = Area
+    template_name = "matriculas/gestion_lista.html"
+    extra_context = {
+        "titulo": "Departamentos",
+        "url_nuevo": "area_nueva", "url_editar": "area_editar", "url_eliminar": "area_eliminar",
+        "url_fila": "promotorias_por_area", "etiqueta_singular": "promotoría", "etiqueta_plural": "promotorías",
+        "mostrar_tag_area": True,
+    }
+
+    def get_queryset(self):
+        return Area.objects.annotate(total_hijos=Count("promotorias", distinct=True)).order_by("nombre")
+
+
+class AreaCreateView(RolGestionRequiredMixin, CreateView):
+    model = Area
+    fields = ["nombre"]
+    template_name = "matriculas/gestion_form.html"
+    success_url = reverse_lazy("area_lista")
+    extra_context = {"titulo": "Nueva área", "url_lista": "area_lista"}
+
+    def form_valid(self, form):
+        messages.success(self.request, "Área creada.")
+        return super().form_valid(form)
+
+
+class AreaUpdateView(RolGestionRequiredMixin, UpdateView):
+    model = Area
+    fields = ["nombre"]
+    template_name = "matriculas/gestion_form.html"
+    success_url = reverse_lazy("area_lista")
+    extra_context = {"titulo": "Editar área", "url_lista": "area_lista"}
+
+    def form_valid(self, form):
+        messages.success(self.request, "Área actualizada.")
+        return super().form_valid(form)
+
+
+class AreaDeleteView(RolGestionRequiredMixin, BorradoProtegidoMixin, DeleteView):
+    model = Area
+    template_name = "matriculas/gestion_confirma_borrado.html"
+    success_url = reverse_lazy("area_lista")
+    extra_context = {"url_lista": "area_lista"}
+
+
+# ---------------------------------------------------------------------------
+# Periodo
+# ---------------------------------------------------------------------------
+
+class PeriodoListView(RolGestionRequiredMixin, ListView):
+    model = Periodo
+    template_name = "matriculas/gestion_lista.html"
+    extra_context = {"titulo": "Periodos", "url_nuevo": "periodo_nuevo", "url_editar": "periodo_editar", "url_eliminar": "periodo_eliminar"}
+
+    def get_queryset(self):
+        return Periodo.objects.order_by("-fecha_inicio")
+
+
+class PeriodoCreateView(RolGestionRequiredMixin, CreateView):
+    model = Periodo
+    # `activo` NO va en el formulario: solo puede haber un periodo en curso, así
+    # que marcarlo aquí chocaría contra la restricción sin salida posible.
+    # Cambiar el periodo en curso es una acción propia, en Gestión → Iniciar /
+    # finalizar matrículas, que desactiva el anterior en la misma transacción.
+    fields = ["nombre", "fecha_inicio", "fecha_fin"]
+    template_name = "matriculas/gestion_form.html"
+    success_url = reverse_lazy("periodo_lista")
+    extra_context = {"titulo": "Nuevo periodo", "url_lista": "periodo_lista"}
+
+    def form_valid(self, form):
+        messages.success(self.request, "Periodo creado.")
+        return super().form_valid(form)
+
+
+class PeriodoUpdateView(RolGestionRequiredMixin, UpdateView):
+    model = Periodo
+    # `activo` NO va en el formulario: solo puede haber un periodo en curso, así
+    # que marcarlo aquí chocaría contra la restricción sin salida posible.
+    # Cambiar el periodo en curso es una acción propia, en Gestión → Iniciar /
+    # finalizar matrículas, que desactiva el anterior en la misma transacción.
+    fields = ["nombre", "fecha_inicio", "fecha_fin"]
+    template_name = "matriculas/gestion_form.html"
+    success_url = reverse_lazy("periodo_lista")
+    extra_context = {"titulo": "Editar periodo", "url_lista": "periodo_lista"}
+
+    def form_valid(self, form):
+        messages.success(self.request, "Periodo actualizado.")
+        return super().form_valid(form)
+
+
+class PeriodoDeleteView(RolGestionRequiredMixin, BorradoProtegidoMixin, DeleteView):
+    model = Periodo
+    template_name = "matriculas/gestion_confirma_borrado.html"
+    success_url = reverse_lazy("periodo_lista")
+    extra_context = {"url_lista": "periodo_lista"}
+
+
+# ---------------------------------------------------------------------------
+# Promotoría
+# ---------------------------------------------------------------------------
+
+class PromotoriaListView(RolGestionRequiredMixin, ListView):
+    model = Promotoria
+    template_name = "matriculas/gestion_lista.html"
+    extra_context = {
+        "titulo": "Promotorías", "url_nuevo": "promotoria_nueva",
+        "url_editar": "promotoria_editar", "url_eliminar": "promotoria_eliminar",
+        "url_fila": "grupos_por_promotoria", "etiqueta_singular": "grupo", "etiqueta_plural": "grupos",
+    }
+
+    def get_queryset(self):
+        return Promotoria.objects.select_related("area", "profesor").annotate(
+            total_hijos=Count("grupos", distinct=True)
+        ).order_by("area__nombre", "nombre")
+
+
+class PromotoriasPorAreaView(RolGestionRequiredMixin, ListView):
+    """Promotorías de un solo departamento (llegando desde Departamentos)."""
+    model = Promotoria
+    template_name = "matriculas/gestion_lista.html"
+
+    def get_queryset(self):
+        self.area = get_object_or_404(Area, pk=self.kwargs["area_id"])
+        return Promotoria.objects.filter(area=self.area).select_related("profesor").annotate(
+            total_hijos=Count("grupos", distinct=True)
+        ).order_by("nombre")
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx.update({
+            "titulo": f"Promotorías de {self.area.nombre}",
+            "url_nuevo": "promotoria_nueva", "url_editar": "promotoria_editar", "url_eliminar": "promotoria_eliminar",
+            "url_fila": "grupos_por_promotoria", "etiqueta_singular": "grupo", "etiqueta_plural": "grupos",
+            "preset_campo": "area", "preset_valor": self.area.pk,
+            "migas": [{"texto": "Departamentos", "url": reverse("area_lista")}],
+        })
+        return ctx
+
+
+class PromotoriaCreateView(RolGestionRequiredMixin, CreateView):
+    model = Promotoria
+    fields = ["nombre", "area", "profesor"]
+    template_name = "matriculas/gestion_form.html"
+    extra_context = {"titulo": "Nueva promotoría", "url_lista": "promotoria_lista"}
+
+    def get_initial(self):
+        initial = super().get_initial()
+        area_id = self.request.GET.get("area")
+        if area_id:
+            initial["area"] = area_id
+        return initial
+
+    def get_success_url(self):
+        return reverse("promotorias_por_area", args=[self.object.area_id])
+
+    def form_valid(self, form):
+        messages.success(self.request, "Promotoría creada.")
+        return super().form_valid(form)
+
+
+class PromotoriaUpdateView(RolGestionRequiredMixin, UpdateView):
+    model = Promotoria
+    fields = ["nombre", "area", "profesor"]
+    template_name = "matriculas/gestion_form.html"
+    extra_context = {"titulo": "Editar promotoría", "url_lista": "promotoria_lista"}
+
+    def get_success_url(self):
+        return reverse("promotorias_por_area", args=[self.object.area_id])
+
+    def form_valid(self, form):
+        messages.success(self.request, "Promotoría actualizada.")
+        return super().form_valid(form)
+
+
+class PromotoriaDeleteView(RolGestionRequiredMixin, BorradoProtegidoMixin, DeleteView):
+    model = Promotoria
+    template_name = "matriculas/gestion_confirma_borrado.html"
+    extra_context = {"url_lista": "promotoria_lista"}
+
+    def get_success_url(self):
+        return reverse("promotorias_por_area", args=[self.object.area_id])
+
+
+# ---------------------------------------------------------------------------
+# Grupo
+# ---------------------------------------------------------------------------
+
+class GrupoListView(RolGestionRequiredMixin, ListView):
+    model = Grupo
+    template_name = "matriculas/gestion_lista.html"
+    extra_context = {
+        "titulo": "Grupos", "url_nuevo": "grupo_nuevo", "url_editar": "grupo_editar", "url_eliminar": "grupo_eliminar",
+        "url_fila": "grupo_estudiantes", "etiqueta_singular": "estudiante", "etiqueta_plural": "estudiantes",
+    }
+
+    def get_queryset(self):
+        return Grupo.objects.select_related("promotoria", "promotoria__area").annotate(
+            total_hijos=Count("matriculas", distinct=True, filter=Q(matriculas__estado="activa"))
+        ).order_by("promotoria__area__nombre", "promotoria__nombre", "nivel")
+
+
+class GruposPorPromotoriaView(RolGestionRequiredMixin, ListView):
+    """Grupos de una sola promotoría (llegando desde su departamento)."""
+    model = Grupo
+    template_name = "matriculas/gestion_lista.html"
+
+    def get_queryset(self):
+        self.promotoria = get_object_or_404(Promotoria.objects.select_related("area"), pk=self.kwargs["promotoria_id"])
+        return Grupo.objects.filter(promotoria=self.promotoria).annotate(
+            total_hijos=Count("matriculas", distinct=True, filter=Q(matriculas__estado="activa"))
+        ).order_by("nivel")
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx.update({
+            "titulo": f"Grupos de {self.promotoria.nombre}",
+            "url_nuevo": "grupo_nuevo", "url_editar": "grupo_editar", "url_eliminar": "grupo_eliminar",
+            "url_fila": "grupo_estudiantes", "etiqueta_singular": "estudiante", "etiqueta_plural": "estudiantes",
+            "preset_campo": "promotoria", "preset_valor": self.promotoria.pk,
+            "migas": [
+                {"texto": "Departamentos", "url": reverse("area_lista")},
+                {"texto": self.promotoria.area.nombre, "url": reverse("promotorias_por_area", args=[self.promotoria.area_id])},
+            ],
+        })
+        return ctx
+
+
+class GrupoCreateView(RolGestionRequiredMixin, CreateView):
+    model = Grupo
+    fields = ["promotoria", "nivel", "horario", "salon", "cupo_maximo"]
+    template_name = "matriculas/gestion_form.html"
+    extra_context = {"titulo": "Nuevo grupo", "url_lista": "grupo_lista"}
+
+    def get_initial(self):
+        initial = super().get_initial()
+        promotoria_id = self.request.GET.get("promotoria")
+        if promotoria_id:
+            initial["promotoria"] = promotoria_id
+        return initial
+
+    def get_success_url(self):
+        return reverse("grupos_por_promotoria", args=[self.object.promotoria_id])
+
+    def form_valid(self, form):
+        messages.success(self.request, "Grupo creado.")
+        return super().form_valid(form)
+
+
+class GrupoUpdateView(RolGestionRequiredMixin, UpdateView):
+    model = Grupo
+    fields = ["promotoria", "nivel", "horario", "salon", "cupo_maximo"]
+    template_name = "matriculas/gestion_form.html"
+    extra_context = {"titulo": "Editar grupo", "url_lista": "grupo_lista"}
+
+    def get_success_url(self):
+        return reverse("grupos_por_promotoria", args=[self.object.promotoria_id])
+
+    def form_valid(self, form):
+        messages.success(self.request, "Grupo actualizado.")
+        return super().form_valid(form)
+
+
+class GrupoDeleteView(RolGestionRequiredMixin, BorradoProtegidoMixin, DeleteView):
+    model = Grupo
+    template_name = "matriculas/gestion_confirma_borrado.html"
+    extra_context = {"url_lista": "grupo_lista"}
+
+    def get_success_url(self):
+        return reverse("grupos_por_promotoria", args=[self.object.promotoria_id])
+
+
+@requiere_rol(*ROLES_GESTION)
+def grupo_estudiantes(request, grupo_id):
+    """Roster de estudiantes activos matriculados en un grupo (solo lectura)."""
+    grupo = get_object_or_404(
+        Grupo.objects.select_related("promotoria", "promotoria__area"), pk=grupo_id
+    )
+    matriculas = Matricula.objects.filter(grupo=grupo, estado="activa").select_related(
+        "estudiante", "estudiante__datos_estudiante", "estudiante__datos_estudiante__acudiente"
+    )
+    migas = [
+        {"texto": "Departamentos", "url": reverse("area_lista")},
+        {"texto": grupo.promotoria.area.nombre, "url": reverse("promotorias_por_area", args=[grupo.promotoria.area_id])},
+        {"texto": grupo.promotoria.nombre, "url": reverse("grupos_por_promotoria", args=[grupo.promotoria_id])},
+    ]
+    return render(request, "matriculas/gestion_grupo_estudiantes.html", {
+        "grupo": grupo,
+        "estudiantes": [_ficha_estudiante(m) for m in matriculas],
+        "migas": migas,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Usuarios (User + Perfil + DatosEstudiante/Acudiente si aplica)
+# ---------------------------------------------------------------------------
+
+class UsuarioListView(RolGestionRequiredMixin, ListView):
+    template_name = "matriculas/usuario_lista.html"
+
+    def get_queryset(self):
+        # Los pendientes de rol (rol="") quedan primero para que no se pierdan de vista.
+        return Perfil.objects.select_related("usuario").order_by("rol", "nombre_completo")
+
+
+def _guardar_datos_estudiante(perfil, datos, datos_estudiante_existente, acudiente_existente):
+    acudiente = acudiente_existente
+    if datos.get("acudiente_nombre"):
+        if acudiente is None:
+            acudiente = Acudiente(nombre="")
+        acudiente.nombre = datos["acudiente_nombre"]
+        acudiente.telefono = datos.get("acudiente_telefono", "")
+        acudiente.save()
+
+    datos_estudiante = datos_estudiante_existente or DatosEstudiante(perfil=perfil)
+    datos_estudiante.documento_identidad = datos["documento_identidad"]
+    if datos.get("copia_documento"):
+        datos_estudiante.copia_documento = datos["copia_documento"]
+    datos_estudiante.acudiente = acudiente
+    datos_estudiante.full_clean()
+    datos_estudiante.save()
+
+
+@requiere_rol(*ROLES_GESTION)
+def usuario_nuevo(request):
+    if request.method == "POST":
+        form = UsuarioForm(request.POST, request.FILES, es_creacion=True)
+        if form.is_valid():
+            datos = form.cleaned_data
+            try:
+                with transaction.atomic():
+                    user = User.objects.create_user(username=datos["username"], password=datos["password"])
+                    perfil = Perfil.objects.create(
+                        usuario=user,
+                        rol=datos["rol"],
+                        nombre_completo=datos["nombre_completo"],
+                        fecha_nacimiento=datos["fecha_nacimiento"],
+                        telefono=datos["telefono"],
+                        foto_perfil=datos["foto_perfil"],
+                    )
+                    if datos["rol"] == "estudiante":
+                        _guardar_datos_estudiante(perfil, datos, None, None)
+            except IntegrityError:
+                messages.error(request, "Ya existe un usuario con ese nombre de usuario, o un estudiante con ese documento.")
+            except ValidationError as exc:
+                messages.error(request, " ".join(exc.messages))
+            else:
+                messages.success(request, "Usuario creado.")
+                return redirect("usuario_lista")
+    else:
+        form = UsuarioForm(es_creacion=True)
+
+    return render(request, "matriculas/usuario_form.html", {
+        "form": form, "titulo": "Nuevo usuario", "es_creacion": True,
+    })
+
+
+@requiere_rol(*ROLES_GESTION)
+def usuario_editar(request, perfil_id):
+    perfil = get_object_or_404(Perfil, pk=perfil_id)
+    datos_estudiante = getattr(perfil, "datos_estudiante", None)
+    acudiente = datos_estudiante.acudiente if datos_estudiante else None
+
+    if request.method == "POST":
+        form = UsuarioForm(request.POST, request.FILES, es_creacion=False)
+        if form.is_valid():
+            datos = form.cleaned_data
+            try:
+                with transaction.atomic():
+                    user = perfil.usuario
+                    user.username = datos["username"]
+                    if datos.get("password"):
+                        user.set_password(datos["password"])
+                    user.save()
+
+                    perfil.rol = datos["rol"]
+                    perfil.nombre_completo = datos["nombre_completo"]
+                    perfil.fecha_nacimiento = datos["fecha_nacimiento"]
+                    perfil.telefono = datos["telefono"]
+                    if datos.get("foto_perfil"):
+                        perfil.foto_perfil = datos["foto_perfil"]
+                    perfil.save()
+
+                    if datos["rol"] == "estudiante":
+                        _guardar_datos_estudiante(perfil, datos, datos_estudiante, acudiente)
+            except IntegrityError:
+                messages.error(request, "Ya existe un usuario con ese nombre de usuario, o un estudiante con ese documento.")
+            except ValidationError as exc:
+                messages.error(request, " ".join(exc.messages))
+            else:
+                messages.success(request, "Usuario actualizado.")
+                return redirect("usuario_lista")
+    else:
+        inicial = {
+            "username": perfil.usuario.username,
+            "rol": perfil.rol,
+            "nombre_completo": perfil.nombre_completo,
+            "fecha_nacimiento": perfil.fecha_nacimiento,
+            "telefono": perfil.telefono,
+        }
+        if datos_estudiante:
+            inicial["documento_identidad"] = datos_estudiante.documento_identidad
+        if acudiente:
+            inicial["acudiente_nombre"] = acudiente.nombre
+            inicial["acudiente_telefono"] = acudiente.telefono
+        form = UsuarioForm(initial=inicial, es_creacion=False)
+
+    return render(request, "matriculas/usuario_form.html", {
+        "form": form, "titulo": f"Editar a {perfil.nombre_completo}", "es_creacion": False, "perfil": perfil,
+    })
+
+
+@requiere_rol(*ROLES_GESTION)
+def usuario_alternar_activo(request, perfil_id):
+    if request.method != "POST":
+        return redirect("usuario_lista")
+
+    perfil = get_object_or_404(Perfil, pk=perfil_id)
+    user = perfil.usuario
+    if user == request.user:
+        messages.error(request, "No puedes desactivar tu propia cuenta.")
+        return redirect("usuario_lista")
+
+    user.is_active = not user.is_active
+    user.save(update_fields=["is_active"])
+    messages.success(request, f"Cuenta {'activada' if user.is_active else 'desactivada'}.")
+    return redirect("usuario_lista")

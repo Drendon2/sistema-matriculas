@@ -1,0 +1,171 @@
+{% extends "matriculas/base.html" %}
+
+{% block title %}Estadísticas{% endblock %}
+
+{% block content %}
+<a href="{% url 'gestion_inicio' %}" class="volver">&larr; Gestión</a>
+<h2>Estadísticas</h2>
+
+<div class="card" style="margin-bottom: 2.2rem;">
+  <div class="dash-resumen">
+    <div>
+      <span class="dash-stat-num">{{ total_estudiantes_activos }}</span>
+      <span class="dash-stat-label">Estudiantes activos</span>
+    </div>
+    <div>
+      <span class="dash-stat-num">{{ total_promotorias }}</span>
+      <span class="dash-stat-label">Promotorías</span>
+    </div>
+    <div>
+      <span class="dash-stat-num">{{ total_grupos }}</span>
+      <span class="dash-stat-label">Grupos</span>
+    </div>
+    <div>
+      <span class="dash-stat-num">{{ total_encuestas }}/{{ total_con_rol }}</span>
+      <span class="dash-stat-label">Encuestas completadas</span>
+    </div>
+  </div>
+</div>
+
+<h3 style="margin-top: 0.5rem;">Estudiantes por departamento y promotoría</h3>
+{% if not arbol_departamentos %}
+  <p class="vacio">Todavía no hay matrículas activas.</p>
+{% else %}
+  {% for d in arbol_departamentos %}
+  <div class="dash-departamento">
+    <div class="stat-bar-fila">
+      <span class="stat-bar-etiqueta"><span class="tag-dot {{ d.tag_class }}"></span>{{ d.nombre }}</span>
+      <div class="stat-bar-pista"><div class="stat-bar-relleno {{ d.tag_class }}" style="width: {{ d.porcentaje }}%;"></div></div>
+      <span class="stat-bar-num">{{ d.total }}</span>
+    </div>
+    <div class="dash-promotorias">
+      {% for p in d.promotorias %}
+      <div class="stat-bar-fila">
+        <span class="stat-bar-etiqueta">{{ p.etiqueta }}</span>
+        <div class="stat-bar-pista"><div class="stat-bar-relleno" style="width: {{ p.porcentaje }}%;"></div></div>
+        <span class="stat-bar-num">{{ p.total }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+{% endif %}
+
+<div class="dash-grid-2">
+  <div>
+    <h3>Grupos por nivel</h3>
+    {% if not grupos_por_curso %}
+      <p class="vacio">Todavía no hay grupos creados.</p>
+    {% else %}
+      {% for g in grupos_por_curso %}
+      <div class="stat-bar-fila">
+        <span class="stat-bar-etiqueta">{{ g.etiqueta }}</span>
+        <div class="stat-bar-pista"><div class="stat-bar-relleno" style="width: {{ g.porcentaje }}%;"></div></div>
+        <span class="stat-bar-num">{{ g.total }}</span>
+      </div>
+      {% endfor %}
+    {% endif %}
+  </div>
+  <div>
+    <h3>Estudiantes por periodo</h3>
+    {% if not estudiantes_por_periodo %}
+      <p class="vacio">Todavía no hay matrículas activas.</p>
+    {% else %}
+      {% for pe in estudiantes_por_periodo %}
+      <div class="stat-bar-fila">
+        <span class="stat-bar-etiqueta">{{ pe.etiqueta }}</span>
+        <div class="stat-bar-pista"><div class="stat-bar-relleno" style="width: {{ pe.porcentaje }}%;"></div></div>
+        <span class="stat-bar-num">{{ pe.total }}</span>
+      </div>
+      {% endfor %}
+    {% endif %}
+  </div>
+</div>
+
+<details class="perfil-seccion" style="max-width: none; margin-top: 2.6rem;">
+  <summary class="perfil-seccion-cabecera">
+    <span class="perfil-seccion-icono icono-encuesta" aria-hidden="true">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="6" y="4" width="12" height="17" rx="2"/>
+        <path d="M9 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1"/>
+        <path d="M9 11h6M9 15h6M9 19h3"/>
+      </svg>
+    </span>
+    <h3 style="margin:0;">Encuesta demográfica</h3>
+    <svg class="perfil-seccion-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+  </summary>
+
+  <p class="campo-info" style="margin: 0.9rem 0 1.3rem;">{{ total_encuestas }} de {{ total_con_rol }} personas con rol asignado han diligenciado la encuesta. Estas cifras son agregadas — ninguna respuesta individual se muestra aquí.</p>
+
+  <div class="dash-grid-2">
+    <div>
+      <h4>Género</h4>
+      {% for gs in genero_stats %}
+      <div class="stat-bar-fila">
+        <span class="stat-bar-etiqueta">{{ gs.etiqueta }}</span>
+        <div class="stat-bar-pista"><div class="stat-bar-relleno" style="width: {{ gs.porcentaje }}%;"></div></div>
+        <span class="stat-bar-num">{{ gs.total }}</span>
+      </div>
+      {% empty %}
+      <p class="vacio">Sin respuestas todavía.</p>
+      {% endfor %}
+    </div>
+    <div>
+      <h4>Estrato</h4>
+      {% for es in estrato_stats %}
+      <div class="stat-bar-fila">
+        <span class="stat-bar-etiqueta">{{ es.etiqueta }}</span>
+        <div class="stat-bar-pista"><div class="stat-bar-relleno" style="width: {{ es.porcentaje }}%;"></div></div>
+        <span class="stat-bar-num">{{ es.total }}</span>
+      </div>
+      {% empty %}
+      <p class="vacio">Sin respuestas todavía.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <h4>Autorización de tratamiento de datos</h4>
+  {% if total_encuestas %}
+    <div class="dash-split">
+      <div class="dash-split-si" style="width: {{ pct_autoriza_si }}%;"></div>
+      <div class="dash-split-no" style="width: {{ pct_autoriza_no }}%;"></div>
+    </div>
+    <div class="dash-split-leyenda">
+      <span><span class="punto" style="background: var(--accent);"></span>Autorizan ({{ autoriza_si }})</span>
+      <span><span class="punto" style="background: var(--border-strong);"></span>No autorizan ({{ autoriza_no }})</span>
+    </div>
+  {% else %}
+    <p class="vacio">Sin respuestas todavía.</p>
+  {% endif %}
+
+  <div class="dash-grid-2" style="margin-top: 1.7rem;">
+    <div>
+      <h4>Nivel educativo <span style="font-weight:400;text-transform:none;letter-spacing:normal;">(top 5)</span></h4>
+      <ul class="dash-top-lista">
+        {% for n in nivel_educativo_top %}<li>{{ n.etiqueta }}<span class="dash-top-num">{{ n.total }}</span></li>{% empty %}<li style="border:none;" class="vacio">Sin datos.</li>{% endfor %}
+      </ul>
+    </div>
+    <div>
+      <h4>Ocupación <span style="font-weight:400;text-transform:none;letter-spacing:normal;">(top 5)</span></h4>
+      <ul class="dash-top-lista">
+        {% for o in ocupacion_top %}<li>{{ o.etiqueta }}<span class="dash-top-num">{{ o.total }}</span></li>{% empty %}<li style="border:none;" class="vacio">Sin datos.</li>{% endfor %}
+      </ul>
+    </div>
+  </div>
+
+  <div class="dash-grid-2" style="margin-top: 1.3rem;">
+    <div>
+      <h4>Grupo étnico <span style="font-weight:400;text-transform:none;letter-spacing:normal;">(top 5, dato sensible y opcional)</span></h4>
+      <ul class="dash-top-lista">
+        {% for ge in grupo_etnico_top %}<li>{{ ge.etiqueta }}<span class="dash-top-num">{{ ge.total }}</span></li>{% empty %}<li style="border:none;" class="vacio">Sin datos.</li>{% endfor %}
+      </ul>
+    </div>
+    <div>
+      <h4>Discapacidad <span style="font-weight:400;text-transform:none;letter-spacing:normal;">(top 5, dato sensible y opcional)</span></h4>
+      <ul class="dash-top-lista">
+        {% for di in discapacidad_top %}<li>{{ di.etiqueta }}<span class="dash-top-num">{{ di.total }}</span></li>{% empty %}<li style="border:none;" class="vacio">Sin datos.</li>{% endfor %}
+      </ul>
+    </div>
+  </div>
+</details>
+{% endblock %}

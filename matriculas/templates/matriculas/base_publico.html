@@ -1,0 +1,180 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ configuracion.nombre_institucion }}{% endblock %}</title>
+<style>
+  :root {
+    --bg: #f2f5f3;
+    --surface: #ffffff;
+    --surface-alt: #eaf1ec;
+    --border: #dce4df;
+    --border-strong: #c3cfc7;
+    --ink: #182420;
+    --ink-soft: #55645c;
+    --ink-faint: #56655d;
+    --accent: #0a7a59;
+    --accent-dark: #065a41;
+    --accent-soft: #dbf2e7;
+    --danger: #b22e22;
+    --danger-bg: #fbe4e1;
+    --radius-lg: 18px;
+    --radius: 12px;
+    --radius-sm: 8px;
+    --shadow: 0 4px 10px rgba(24,36,32,0.10), 0 12px 28px rgba(24,36,32,0.12);
+    --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Segoe UI Mono", Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: var(--font-body);
+    background: var(--bg);
+    min-height: 100vh;
+    margin: 0;
+    padding: 2.5rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ink);
+  }
+  .marca { text-align: center; margin-bottom: 1.3rem; }
+  .marca .escudo { width: 60px; height: 60px; display: block; margin: 0 auto 0.6rem; }
+  .marca span { display: block; font-size: 0.72rem; letter-spacing: 0.05em; color: var(--ink-soft); font-weight: 600; }
+  .envoltorio { width: 100%; }
+  .caja {
+    background: var(--surface);
+    padding: 2.2rem 2.1rem;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+    width: 100%;
+    max-width: {% block ancho %}400px{% endblock %};
+    margin: 0 auto;
+  }
+  .caja h1 { font-size: 1.45rem; font-weight: 800; color: var(--ink); margin: 0 0 0.3rem; letter-spacing: -0.015em; }
+  .caja p.info { font-size: 0.85rem; color: var(--ink-soft); margin: 0 0 1.2rem; line-height: 1.5; }
+  .caja label { display: block; margin-top: 0.85rem; font-size: 0.85rem; font-weight: 700; color: var(--ink); }
+  .caja input, .caja select {
+    width: 100%; padding: 0.8rem 0.75rem; margin-top: 0.25rem; box-sizing: border-box;
+    font-family: var(--font-body); font-size: 1rem; color: var(--ink);
+    border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .caja input:focus, .caja select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .caja input[type="file"] { padding: 0.5rem; background: var(--surface-alt); }
+  .caja button {
+    margin-top: 1.4rem; width: 100%; min-height: 48px; background: var(--accent); color: #fff; border: 1px solid var(--accent);
+    padding: 0.85rem; border-radius: var(--radius-sm); cursor: pointer; font-size: 0.9rem; font-weight: 700;
+    font-family: var(--font-body); transition: background 0.15s ease, transform 0.08s ease;
+  }
+  .caja button:hover { background: var(--accent-dark); border-color: var(--accent-dark); }
+  .caja button:active { transform: scale(0.98); }
+  .caja fieldset { border: 1px solid var(--border); border-radius: var(--radius-sm); margin-top: 1.1rem; padding: 0.3rem 0.9rem 0.9rem; }
+  .caja legend { font-size: 0.72rem; color: var(--ink-soft); padding: 0 0.35rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+  .errorlist { list-style: none; color: var(--danger); font-size: 0.85rem; padding: 0; margin: 0.25rem 0 0; }
+  .messages { list-style: none; padding: 0; margin: 0 0 1.1rem; }
+  .messages li { padding: 0.6rem 0.8rem; border-radius: var(--radius-sm); margin-bottom: 0.4rem; font-size: 0.85rem; border: 1px solid transparent; }
+  .messages .success { background: var(--accent-soft); color: var(--accent-dark); border-color: rgba(10,122,89,0.2); }
+  .messages .error { background: var(--danger-bg); color: var(--danger); border-color: rgba(178,46,34,0.2); }
+  .enlace-pie { text-align: center; font-size: 0.85rem; margin: 1.1rem 0 0; }
+  .enlace-pie a { color: var(--accent); text-decoration: none; font-weight: 700; }
+  .enlace-pie a:hover { color: var(--accent-dark); text-decoration: underline; }
+  .campo-info { color: var(--ink-soft); font-size: 0.85rem; margin: 0.3rem 0 0; line-height: 1.4; }
+  .archivo-guardado { color: var(--accent-dark); }
+  .archivo-guardado strong { color: inherit; }
+  .aviso { background: var(--surface-alt); color: var(--ink-soft); padding: 0.75rem 0.9rem; border-radius: var(--radius-sm); border: 1px dashed var(--border-strong); font-size: 0.85rem; line-height: 1.5; margin: 0 0 1.1rem; }
+  .campo-requerido { color: var(--danger); font-weight: 700; }
+  .campo-condicional { transition: border-color 0.15s ease, background 0.15s ease; }
+  .campo-condicional[data-activo="true"] { border-color: var(--accent); background: var(--accent-soft); }
+  .campo-condicional .campo-condicional-nota { font-size: 0.85rem; color: var(--ink-soft); margin: 0 0 0.7rem; }
+  .campo-condicional[data-activo="true"] .campo-condicional-nota { color: var(--accent-dark); font-weight: 700; }
+  .caja fieldset.destacado { border: 2px solid var(--accent); background: var(--accent-soft); margin-top: 1.6rem; padding: 0.9rem 1rem 1rem; }
+  .caja fieldset.destacado legend { color: var(--accent-dark); font-size: 0.8rem; }
+  .caja fieldset.destacado label { font-size: 1rem; margin-top: 0; }
+  .caja fieldset.destacado button { margin-top: 1rem; }
+
+  /* Promotorías: tantos cupos como permita la configuración de la institución
+     (`form.limite`), no un número fijo. Solo el primero ocupa sitio de entrada;
+     los demás se piden uno a uno, para no cargar el formulario público.
+     El bloque se sostiene por su propio fondo, sin borde de acento: el marco de
+     2px competía con el botón de envío por la única nota de color de la
+     tarjeta. */
+  .caja fieldset.promotorias {
+    border: 0; background: var(--accent-soft); border-radius: var(--radius);
+    margin: 1.6rem 0.125rem 0; padding: 1.15rem 1rem 1rem;
+  }
+  .caja fieldset.promotorias legend {
+    color: var(--ink); font-size: 1.2rem; font-weight: 700; padding: 0 0 0.15rem;
+  }
+  .caja .promo-nota { font-size: 0.9rem; color: var(--ink-soft); line-height: 1.45; margin: 0 0 1rem; }
+  .caja .promo-nota strong { color: var(--ink); }
+  .caja .promo-campo { margin-bottom: 0.85rem; }
+  .caja .promo-campo > label {
+    display: block; margin: 0 0 0.35rem; font-size: 0.85rem;
+    font-weight: 700; color: var(--ink);
+  }
+  /* Regla de los 16px: el selector no baja de 1rem en ningún breakpoint. */
+  .caja .promo-campo select { font-size: 1rem; }
+  /* "opcional" es una aclaración en prosa, no un dato: sin monoespaciada ni
+     mayúsculas, para no confundirla con un marcador de estado. */
+  .caja .promo-opcional { font-size: 0.78rem; font-weight: 400; color: var(--ink-soft); }
+  /* Baldosa punteada de "añadir": invita sin competir con el botón de envío. */
+  .caja .promo-anadir {
+    display: flex; align-items: center; justify-content: center; gap: 0.4rem;
+    width: 100%; margin-top: 0.2rem; min-height: 44px;
+    background: transparent; color: var(--accent); border: 1px dashed var(--accent);
+    font-size: 0.9rem; font-weight: 700; border-radius: var(--radius-sm);
+    padding: 0.6rem 0.9rem; cursor: pointer; font-family: var(--font-body);
+    transition: background 0.15s ease, border-style 0.15s ease;
+  }
+  .caja .promo-anadir:hover { background: var(--surface); border-style: solid; color: var(--accent-dark); }
+  .caja .promo-anadir[hidden] { display: none; }
+  .caja .promo-quitar {
+    width: auto; margin-top: 0.45rem; min-height: 0; background: none; border: 0;
+    padding: 0; color: var(--ink-soft); font-size: 0.82rem; font-weight: 700;
+    text-decoration: underline; cursor: pointer; font-family: var(--font-body);
+  }
+  .caja .promo-quitar:hover { color: var(--danger); background: none; }
+  /* Cifra de cupos: es un dato, va en monoespaciada. */
+  .caja .promo-contador {
+    font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700;
+    letter-spacing: 0.045em; color: var(--ink-soft); margin: 1rem 0 0.85rem;
+  }
+  .caja fieldset.promotorias button[type="submit"] { margin-top: 0; }
+
+  @media (max-width: 640px) {
+    body { padding: 1.5rem 0.85rem; }
+    .caja { padding: 1.6rem 1.35rem; }
+  }
+</style>
+{# Marca configurable: sobreescribe SOLO el acento y sus dos tonos derivados. #}
+<style>
+  :root {
+    --accent: {{ configuracion.color_acento }};
+    --accent-dark: {{ configuracion.color_acento_oscuro }};
+    --accent-soft: {{ configuracion.color_acento_suave }};
+  }
+</style>
+</head>
+<body>
+<!--
+THESIS: Una matrícula no es un formulario que cae en una base de datos, es un cupo pineado en la cartelera del propio estudio — así se muestra.
+OWN-WORLD: Fondo blanco-pizarra, tinta carbón, un verde esmeralda como único color de marca/acción, y un set de colores de etiqueta rotando por Área como marcadores distintos. El estado se lee por FORMA de marcador, nunca solo color. Las tarjetas son rectángulos de esquina suave con una sola sombra nítida, como una ficha pineada en la pared.
+STORY: El público ve su cupo pineado en una cartelera real en cuanto se inscribe.
+FIRST VIEWPORT: La tarjeta pública flotante — marca circular arriba, formulario claro y legible, botón primario esmeralda al fondo.
+FORM: Cartelera de estudio (community class bulletin/schedule board) — candidato 3/7, seed key 14f6aec3.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+-->
+  <div class="envoltorio">
+    <div class="marca">
+      <img class="escudo" src="{% if configuracion.logo %}{% url 'logo_institucion' %}{% else %}{% static 'matriculas/img/logo.webp' %}{% endif %}" alt="{{ configuracion.nombre_institucion }}" width="60" height="60">
+      <span>{{ configuracion.nombre_institucion }}</span>
+    </div>
+    <div class="caja">
+      {% block caja %}{% endblock %}
+    </div>
+  </div>
+</body>
+</html>

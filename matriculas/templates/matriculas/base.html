@@ -1,0 +1,703 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Matrículas{% endblock %} — {{ configuracion.nombre_institucion }}</title>
+<style>
+  :root {
+    --bg: #f2f5f3;
+    --surface: #ffffff;
+    --surface-alt: #eaf1ec;
+    --border: #dce4df;
+    --border-strong: #c3cfc7;
+    --ink: #182420;
+    --ink-soft: #55645c;
+    --ink-faint: #56655d;
+    --accent: #0a7a59;
+    --accent-dark: #065a41;
+    --accent-soft: #dbf2e7;
+    --activa: #2458d6;
+    --activa-bg: #e3ebfc;
+    --danger: #b22e22;
+    --danger-bg: #fbe4e1;
+    --radius-lg: 18px;
+    --radius: 12px;
+    --radius-sm: 8px;
+    --shadow: 0 1px 2px rgba(24,36,32,0.05), 0 6px 16px rgba(24,36,32,0.08);
+    --shadow-lift: 0 4px 10px rgba(24,36,32,0.10), 0 12px 28px rgba(24,36,32,0.12);
+    --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Segoe UI Mono", Consolas, "Liberation Mono", monospace;
+    /* Etiquetas de Área: un color estable por id (ver templatetag tag_color) — como
+       un marcador de color distinto por disciplina en la cartelera del estudio. */
+    --tag-0: #8f5e10; --tag-0-bg: #fbecd3;
+    --tag-1: #7c4fce; --tag-1-bg: #ede4fb;
+    --tag-2: #c4447b; --tag-2-bg: #fae1ec;
+    --tag-3: #12676a; --tag-3-bg: #dcf2f2;
+    --tag-4: #5b57c9; --tag-4-bg: #e6e5fa;
+    --tag-5: #c1571f; --tag-5-bg: #fbe4d2;
+    --tag-6: #a83cae; --tag-6-bg: #f5e1f6;
+    --tag-7: #766a19; --tag-7-bg: #f0ecd3;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    font-family: var(--font-body);
+    background: var(--bg);
+    margin: 0;
+    color: var(--ink);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: var(--accent); }
+  a:hover { color: var(--accent-dark); }
+
+  h1, h2, h3, h4 { font-family: var(--font-body); color: var(--ink); text-wrap: balance; }
+  h2 { font-size: 1.75rem; font-weight: 800; margin: 0 0 1.2rem; letter-spacing: -0.02em; }
+  h3 { font-size: 1.2rem; font-weight: 700; margin: 2.4rem 0 0.7rem; }
+  h3:first-of-type { margin-top: 0.5rem; }
+  h4 { font-size: 0.78rem; margin: 1.5rem 0 0.65rem; color: var(--ink-soft); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  header {
+    background: var(--surface);
+    color: var(--ink);
+    padding: 1rem 1.75rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 {
+    font-size: 1.05rem;
+    margin: 0;
+    color: var(--ink);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+  }
+  .marca-header { display: flex; align-items: center; gap: 0.65rem; }
+  .marca-header img { display: block; flex-shrink: 0; }
+  header nav { display: flex; align-items: center; flex-wrap: wrap; gap: 0.2rem; }
+  header nav a {
+    color: var(--ink-soft);
+    margin-left: 0.15rem;
+    text-decoration: none;
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius-sm);
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  header nav a:hover { background: var(--surface-alt); color: var(--ink); }
+  header nav form { margin-left: 0.5rem; }
+
+  main { max-width: 960px; margin: 2rem auto 4rem; padding: 0 1.25rem; }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 44px;
+    background: var(--accent);
+    color: #fff;
+    border: 1px solid var(--accent);
+    padding: 0.65rem 1.2rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 700;
+    font-family: var(--font-body);
+    text-decoration: none;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.08s ease;
+  }
+  .btn:hover { background: var(--accent-dark); border-color: var(--accent-dark); color: #fff; }
+  .btn:active { transform: scale(0.97); }
+  .btn-secundario { background: transparent; color: var(--accent); border-color: var(--border-strong); }
+  .btn-secundario:hover { background: var(--surface-alt); color: var(--accent-dark); border-color: var(--border-strong); }
+  .btn-retirar {
+    background: transparent; color: var(--ink-soft); border: 1.5px dashed var(--border-strong);
+    text-decoration: line-through;
+  }
+  .btn-retirar:hover { color: var(--danger); border-color: var(--danger); background: var(--danger-bg); }
+  .btn-sm { min-height: 0; padding: 0.36rem 0.75rem; font-size: 0.78rem; }
+  .btn-blanco { background: transparent; color: var(--ink-soft); border: 1px solid var(--border-strong); }
+  .btn-blanco:hover { background: var(--surface-alt); color: var(--ink); border-color: var(--border-strong); }
+  .btn-texto {
+    background: none; border: none; color: var(--ink-soft); cursor: pointer;
+    padding: 0; font-size: 0.85rem; text-decoration: underline; font-family: var(--font-body);
+    font-weight: 600;
+  }
+  .btn-texto:hover { color: var(--danger); }
+
+  .volver { display: inline-block; font-size: 0.85rem; color: var(--ink-soft); text-decoration: none; margin-bottom: 1rem; }
+  .volver:hover { color: var(--accent); }
+
+  .migas { font-size: 0.85rem; color: var(--ink-soft); margin-bottom: 0.9rem; }
+  .migas a { color: var(--ink-soft); text-decoration: none; }
+  .migas a:hover { color: var(--accent); text-decoration: underline; }
+  .migas .migas-sep { margin: 0 0.45rem; color: var(--ink-faint); }
+  .migas .migas-actual { color: var(--ink); font-weight: 700; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 1.6rem 1.85rem;
+  }
+
+  .form-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 1.85rem;
+    max-width: 520px;
+  }
+  .form-card fieldset {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    margin: 1.1rem 0 0;
+    padding: 0.3rem 1rem 0.9rem;
+  }
+  .form-card legend { font-size: 0.72rem; color: var(--ink-soft); padding: 0 0.4rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+
+  .field { margin-bottom: 1.05rem; }
+  .field label, .form-card > form > label, .form-card label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+    color: var(--ink);
+  }
+  .campo-info { color: var(--ink-soft); font-size: 0.85rem; margin: -0.6rem 0 1.2rem; }
+
+  input, select, textarea {
+    font-family: var(--font-body);
+    font-size: 1rem;
+    color: var(--ink);
+    width: 100%;
+    padding: 0.7rem 0.75rem;
+    margin-top: 0.15rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  input[type="file"] { padding: 0.4rem 0.5rem; background: var(--surface-alt); }
+  input[type="checkbox"] { width: auto; margin-right: 0.4rem; }
+
+  .form-card button[type="submit"] { margin-top: 1.3rem; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    font-size: 0.9rem;
+    box-shadow: var(--shadow);
+  }
+  th, td { text-align: left; padding: 0.65rem 0.9rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  th {
+    background: var(--surface-alt); color: var(--ink-soft); font-size: 0.72rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em; font-family: var(--font-mono);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: var(--surface-alt); }
+  td.num, th.num { font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
+
+  /* Estado de matrícula: un marcador de cartelera, no una píldora de color plano.
+     Activa = pin sólido (relleno + puntito), pendiente = contorno punteado (sin
+     pinear todavía), retirada = tachado. Forma primero, color después. */
+  .estado {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.045em;
+    padding: 0.28rem 0.65rem;
+    border-radius: var(--radius-sm);
+  }
+  .estado-activa::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--activa); flex-shrink: 0; }
+  .estado-activa {
+    background: var(--activa-bg); color: var(--activa);
+    border: 1.5px solid var(--activa);
+    box-shadow: 0 1px 4px rgba(36,88,214,0.20);
+  }
+  .estado-pendiente {
+    background: transparent; color: var(--ink-soft);
+    border: 1.5px dashed var(--border-strong);
+  }
+  .estado-retirada {
+    background: var(--danger-bg); color: var(--danger);
+    border: 1.5px solid var(--danger);
+    text-decoration: line-through;
+  }
+
+  .cupos-agotados { color: var(--danger); font-weight: 700; }
+
+  .messages { list-style: none; padding: 0; margin: 0 0 1.3rem; }
+  .messages li { padding: 0.7rem 1rem; border-radius: var(--radius-sm); margin-bottom: 0.5rem; font-size: 0.85rem; border: 1px solid transparent; }
+  .messages .success { background: var(--accent-soft); color: var(--accent-dark); border-color: rgba(10,122,89,0.2); }
+  .messages .error { background: var(--danger-bg); color: var(--danger); border-color: rgba(178,46,34,0.2); }
+
+  .vacio { color: var(--ink-faint); font-style: italic; padding: 1rem 0; }
+
+  .foto-mini { width: 36px; height: 36px; border-radius: var(--radius-sm); object-fit: cover; vertical-align: middle; border: 1px solid var(--border-strong); }
+
+  /* Etiqueta de Área: puntito de color, como un marcador distinto por disciplina. */
+  .tag-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.4rem; flex-shrink: 0; }
+  .tag-0 { background: var(--tag-0); } .tag-1 { background: var(--tag-1); }
+  .tag-2 { background: var(--tag-2); } .tag-3 { background: var(--tag-3); }
+  .tag-4 { background: var(--tag-4); } .tag-5 { background: var(--tag-5); }
+  .tag-6 { background: var(--tag-6); } .tag-7 { background: var(--tag-7); }
+
+  /* Estadísticas de Gestión (solo administrador). */
+  .dash-resumen { display: flex; flex-wrap: wrap; gap: 1.75rem; margin: 0 0 0.5rem; }
+  .dash-stat-num { display: block; font-family: var(--font-mono); font-weight: 700; font-size: 1.5rem; color: var(--ink); }
+  .dash-stat-label { font-size: 0.72rem; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.03em; }
+
+  .stat-bar-fila { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.55rem; }
+  .stat-bar-etiqueta { flex: 0 0 150px; font-size: 0.85rem; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stat-bar-pista { flex: 1 1 auto; height: 10px; background: var(--surface-alt); border-radius: 5px; overflow: hidden; }
+  .stat-bar-relleno { height: 100%; border-radius: 5px; background: var(--accent); }
+  .stat-bar-num { flex: 0 0 auto; font-family: var(--font-mono); font-weight: 700; font-size: 0.82rem; color: var(--ink); min-width: 26px; text-align: right; }
+
+  .dash-departamento { margin-bottom: 1.4rem; }
+  .dash-departamento > .stat-bar-fila .stat-bar-etiqueta { font-weight: 700; }
+  .dash-promotorias { margin: 0.5rem 0 0 1.4rem; padding-left: 0.9rem; border-left: 2px solid var(--border); }
+  .dash-promotorias .stat-bar-fila { margin-bottom: 0.4rem; }
+  .dash-promotorias .stat-bar-etiqueta { flex-basis: 130px; font-size: 0.8rem; color: var(--ink-soft); font-weight: 400; }
+  .dash-promotorias .stat-bar-relleno { background: var(--border-strong); }
+  .dash-promotorias .stat-bar-num { font-size: 0.75rem; color: var(--ink-soft); }
+
+  .dash-split { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--surface-alt); margin: 0.5rem 0; }
+  .dash-split-si { background: var(--accent); }
+  .dash-split-no { background: var(--border-strong); }
+  .dash-split-leyenda { display: flex; gap: 1.25rem; font-size: 0.78rem; color: var(--ink-soft); }
+  .dash-split-leyenda .punto { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.35rem; vertical-align: middle; }
+
+  .dash-top-lista { list-style: none; padding: 0; margin: 0; }
+  .dash-top-lista li { display: flex; justify-content: space-between; gap: 0.75rem; padding: 0.45rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+  .dash-top-lista li:last-child { border-bottom: none; }
+  .dash-top-lista .dash-top-num { font-family: var(--font-mono); color: var(--ink-soft); font-weight: 700; flex-shrink: 0; }
+
+  .dash-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+
+  .carne {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 0.9rem 1.15rem;
+  }
+  .carne .carne-foto { width: 56px; height: 56px; border-radius: var(--radius-sm); object-fit: cover; border: 1px solid var(--border-strong); flex-shrink: 0; }
+  .carne .carne-foto-vacia {
+    width: 56px; height: 56px; border-radius: var(--radius-sm); border: 1px dashed var(--border-strong);
+    flex-shrink: 0; background: var(--surface-alt);
+  }
+  .carne .carne-datos { min-width: 0; }
+  .carne .carne-nombre { font-weight: 700; font-size: 0.95rem; }
+  .carne .carne-detalle { font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-soft); margin-top: 0.15rem; }
+
+  .companero { display: inline-block; text-align: center; width: 92px; margin: 0 0.6rem 1.2rem 0; }
+  .companero .foto-mini { width: 58px; height: 58px; border-radius: var(--radius-sm); display: block; margin: 0 auto 0.4rem; }
+  .companero span { font-size: 0.85rem; color: var(--ink-soft); }
+
+  /* Bloque introductorio de "Mi perfil": foto, pie y cifras centrados como un
+     conjunto compacto — deliberadamente pequeño, esto es un dato de cabecera,
+     no el contenido principal de la página. */
+  .perfil-intro {
+    display: flex; flex-direction: column; align-items: center; text-align: center;
+    max-width: 300px;
+    margin: 0 auto 2rem;
+    background: var(--surface-alt);
+    border-radius: var(--radius-lg);
+    padding: 2rem 1.5rem 1.75rem;
+    box-shadow: 0 1px 2px rgba(24,36,32,0.04), 0 3px 10px rgba(24,36,32,0.05);
+  }
+
+  /* Avatar circular de "Mi perfil" — foto redonda con una insignia de cámara
+     superpuesta, nombre y rol debajo en texto plano. Reemplaza la tarjeta de
+     retrato alta: una foto de perfil es un círculo, no un póster. */
+  .perfil-avatar-wrap { position: relative; display: inline-block; cursor: pointer; margin-bottom: 0.9rem; }
+  .perfil-avatar {
+    display: flex; align-items: center; justify-content: center;
+    width: 104px; height: 104px; border-radius: 50%;
+    overflow: hidden;
+    background: var(--accent-soft);
+    border: 3px solid var(--surface);
+    box-shadow: var(--shadow);
+  }
+  .perfil-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .perfil-avatar-inicial { font-weight: 800; font-size: 2.1rem; color: var(--accent-dark); }
+  .perfil-avatar-badge {
+    position: absolute; right: -2px; bottom: -2px;
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--accent); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    border: 2.5px solid var(--surface);
+    box-shadow: var(--shadow);
+  }
+  .perfil-avatar-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; margin: 0; }
+  .perfil-nombre { font-weight: 800; font-size: 1.15rem; color: var(--ink); }
+  .perfil-rol-sub { font-size: 0.85rem; color: var(--ink-soft); margin-top: 0.1rem; }
+  .perfil-contacto-form { display: inline-flex; align-items: center; gap: 0.5rem; margin: 0.6rem 0 0; }
+  .perfil-contacto-form input { width: auto; max-width: 150px; padding: 0.45rem 0.6rem; margin: 0; }
+  .perfil-seccion { max-width: 520px; margin: 0 auto; }
+
+  .perfil-tel-fila { display: flex; align-items: center; gap: 0.5rem; margin: 0.4rem 0 0; }
+  .perfil-editar-btn {
+    display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+    width: 26px; height: 26px; border-radius: 50%;
+    background: var(--accent); color: #fff; border: none; cursor: pointer; padding: 0;
+    transition: background 0.15s ease;
+  }
+  .perfil-editar-btn:hover { background: var(--accent-dark); }
+  .perfil-tel-form { display: none; align-items: center; gap: 0.5rem; margin: 0.4rem 0 0; }
+  .perfil-tel-hint { border-bottom: 1px dashed var(--border-strong); }
+
+  .perfil-stats { display: flex; justify-content: center; gap: 1.1rem; margin: 0; }
+  .perfil-stat-num { display: block; font-family: var(--font-mono); font-weight: 700; font-size: 1.15rem; color: var(--ink); }
+  .perfil-stat-label { font-size: 0.68rem; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.03em; }
+
+  /* Cabecera de sección de "Mi perfil": chip de icono + título, en vez de un
+     <h3> desnudo — hace que cada bloque (documento, encuesta) se lea como una
+     fila de configuración real. */
+  .perfil-seccion-cabecera { display: flex; align-items: center; gap: 0.75rem; margin: 2.2rem 0 0.9rem; }
+  .perfil-seccion-cabecera h3 { margin: 0; }
+  .perfil-seccion-icono {
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    width: 38px; height: 38px; border-radius: var(--radius-sm);
+  }
+  .perfil-seccion-icono.icono-documento { background: var(--tag-3-bg); color: var(--tag-3); }
+  .perfil-seccion-icono.icono-encuesta { background: var(--tag-1-bg); color: var(--tag-1); }
+
+  /* Encuesta desplegable: <details> nativo, sin JS. */
+  summary.perfil-seccion-cabecera { cursor: pointer; list-style: none; }
+  summary.perfil-seccion-cabecera::-webkit-details-marker { display: none; }
+  .perfil-seccion-chevron { margin-left: auto; color: var(--ink-soft); transition: transform 0.15s ease; flex-shrink: 0; }
+  details[open] > summary .perfil-seccion-chevron { transform: rotate(180deg); }
+  .perfil-seccion-estado {
+    font-family: var(--font-mono); font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--ink-soft); margin-left: 0.3rem;
+  }
+
+  /* Promotorías desplegables del Panel. */
+  .panel-item { border-bottom: 1px solid var(--border); margin-bottom: 0.3rem; }
+  .panel-item:last-of-type { border-bottom: none; }
+  .panel-item-resumen {
+    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+    cursor: pointer; list-style: none;
+    font-size: 1.15rem; font-weight: 700; color: var(--ink);
+    padding: 0.9rem 0;
+  }
+  .panel-item-resumen::-webkit-details-marker { display: none; }
+  .panel-item[open] > .panel-item-resumen { padding-bottom: 0.5rem; }
+  .panel-item .estado { margin-left: 0.15rem; }
+
+  .accion-fila { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
+  .grupo-cabecera { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+  .grupo-cabecera .acciones { font-size: 0.8rem; display: flex; gap: 0.6rem; }
+
+  /* Cupo de la promotoría en el periodo: una cifra (mono, es un dato) más el
+     control para cambiarla. Lo ve todo el panel; solo lo edita quien gestiona. */
+  .cupo-fila {
+    display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap;
+    background: var(--surface-alt); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 0.6rem 0.85rem; margin: 0 0 1rem;
+  }
+  .cupo-etiqueta {
+    font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--ink-soft);
+  }
+  .cupo-cifra {
+    font-family: var(--font-mono); font-size: 0.78rem; font-weight: 700;
+    color: var(--ink); background: var(--surface);
+    border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+    padding: 0.15rem 0.5rem;
+  }
+  /* Sin tope: contorno punteado y sin relleno fuerte, igual que "pendiente". */
+  .cupo-cifra-libre { color: var(--ink-faint); border-style: dashed; background: transparent; }
+  .cupo-cifra-lleno { color: var(--danger); border-color: var(--danger); background: var(--danger-bg); }
+  .cupo-form { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
+  .cupo-form-label { font-size: 0.78rem; color: var(--ink-soft); font-weight: 700; margin: 0; }
+  .cupo-form input { width: 6rem; margin: 0; padding: 0.4rem 0.5rem; }
+  .cupo-input { width: 7rem; margin: 0; padding: 0.4rem 0.5rem; }
+  .cupo-input:disabled { background: var(--surface-alt); color: var(--ink-faint); cursor: not-allowed; }
+  .cupo-periodos { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0 0 1rem; }
+  .cupo-periodo {
+    font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700;
+    color: var(--ink-soft); text-decoration: none;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+    padding: 0.25rem 0.6rem; background: var(--surface);
+  }
+  .cupo-periodo:hover { color: var(--accent); border-color: var(--accent); }
+  .cupo-periodo-actual { color: var(--surface); background: var(--accent); border-color: var(--accent); }
+  .cupo-periodo-actual:hover { color: var(--surface); background: var(--accent-dark); }
+
+  /* Renovación: cada promotoría que se arrastra del periodo anterior es una
+     ficha marcable, no una casilla suelta perdida en el margen. */
+  .renovar-opcion {
+    display: flex; align-items: center; gap: 0.7rem;
+    padding: 0.75rem 0.85rem; margin-top: 0.6rem;
+    background: var(--surface); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm); cursor: pointer; font-size: 1rem;
+  }
+  .renovar-opcion:hover { border-color: var(--accent); }
+  .renovar-opcion input { width: 18px; height: 18px; margin: 0; flex: 0 0 auto; accent-color: var(--accent); cursor: pointer; }
+  .renovar-opcion:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+
+  /* Encuesta de satisfacción: enunciado arriba, opciones en fila. */
+  .encuesta-pregunta { margin-top: 1.4rem; }
+  .encuesta-enunciado { font-size: 1rem; font-weight: 700; color: var(--ink); margin: 0 0 0.5rem; }
+  .encuesta-escala ul { list-style: none; display: flex; gap: 1rem; flex-wrap: wrap; padding: 0; margin: 0; }
+  .encuesta-escala li { margin: 0; }
+  .encuesta-escala label {
+    display: flex; align-items: center; gap: 0.35rem; margin: 0;
+    font-size: 1rem; font-weight: 400; cursor: pointer;
+  }
+  .encuesta-escala input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+
+  /* Estado de la ventana de matrículas, en Gestión. */
+  .ventana-estado { margin: 1rem 0 1.2rem; }
+  .ventana-estado p { color: var(--ink-soft); font-size: 0.9rem; margin: 0.6rem 0 0; }
+
+  /* Aviso de renovación disponible, en la lista de promotorías. */
+  .renovar-llamada {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 1rem; flex-wrap: wrap;
+    background: var(--accent-soft); border: 1px solid var(--accent);
+    border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 1rem 1.2rem; margin-bottom: 1.2rem;
+  }
+  .renovar-llamada p { margin: 0; color: var(--accent-dark); font-size: 0.95rem; line-height: 1.5; }
+  .renovar-llamada .btn { flex: 0 0 auto; }
+
+  /* Trayectoria en la promotoría: no es el estado de la matrícula (eso es
+     .estado), es de dónde viene el estudiante. Se lee por forma igual que los
+     estados: renovación va sólida, nuevo va con contorno punteado. */
+  .trayectoria {
+    display: inline-block; font-family: var(--font-mono); font-size: 0.62rem;
+    font-weight: 700; text-transform: uppercase; letter-spacing: 0.045em;
+    padding: 0.15rem 0.45rem; border-radius: var(--radius-sm); white-space: nowrap;
+  }
+  .trayectoria-renovacion { color: var(--ink); background: var(--surface-alt); border: 1px solid var(--border-strong); }
+  .trayectoria-nuevo { color: var(--ink-soft); background: transparent; border: 1px dashed var(--border-strong); }
+
+  /* Periodo cerrado: no es un estado de la matrícula, es una nota sobre el
+     periodo, así que no usa el vocabulario de .estado. */
+  .periodo-terminado { color: var(--ink-faint); font-size: 0.85rem; font-style: italic; }
+
+  /* Pantalla de configuración de la institución. Cada ajuste es un bloque con
+     su propio ritmo etiqueta → control → ayuda, separado por una línea del
+     siguiente.
+     OJO: la ayuda usa .config-ayuda y NO .campo-info, porque esa lleva
+     margin-top negativo (va pegada bajo un título) y aquí, debajo de un campo,
+     se montaba encima del input. */
+
+  /* La pantalla mezcla dos cosas distintas —la marca, que solo cambia cómo se
+     ve el sistema, y una regla que cambia lo que los estudiantes pueden hacer—,
+     así que van en <fieldset> separados: el grupo es real, no decorativo, y así
+     los lectores de pantalla anuncian a qué sección pertenece cada campo. */
+  .config-seccion { border: 0; padding: 0; margin: 0; }
+  .config-seccion + .config-seccion {
+    margin-top: 1.5rem; padding-top: 1.5rem; border-top: 2px solid var(--border);
+  }
+  .config-seccion-titulo {
+    padding: 0; margin: 0 0 1.1rem;
+    font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--ink-soft);
+  }
+  .config-campo { padding-block: 1.35rem; }
+  .config-campo:first-of-type { padding-top: 0; }
+  .config-campo:last-of-type { padding-bottom: 0.4rem; }
+  .config-campo + .config-campo { border-top: 1px solid var(--border); }
+  .config-etiqueta {
+    display: block; font-size: 0.85rem; font-weight: 700;
+    color: var(--ink); margin: 0 0 0.4rem;
+  }
+  .config-ayuda {
+    margin: 0.5rem 0 0; font-size: 0.85rem; color: var(--ink-soft);
+    line-height: 1.45; max-width: 62ch;
+  }
+  .config-logo { display: flex; align-items: flex-start; gap: 0.9rem; }
+  .config-logo-vista {
+    width: 64px; height: 64px; object-fit: contain; flex: 0 0 auto;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 0.35rem;
+  }
+  .config-logo-texto { flex: 1 1 auto; min-width: 0; }
+  .config-logo-texto .config-ayuda { margin-top: 0; }
+  /* El widget de archivo de Django ("Actualmente… / Limpiar / Modificar:")
+     llega como texto suelto; este contenedor lo ordena en una fila. */
+  .config-archivo {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.5rem;
+    margin-top: 0.6rem; font-size: 0.85rem; color: var(--ink-soft);
+  }
+  .config-archivo a { color: var(--accent); word-break: break-all; }
+  .config-archivo label { display: inline; font-size: 0.85rem; font-weight: 600; margin: 0; }
+  .config-archivo input[type="checkbox"] { width: auto; margin: 0 0.2rem 0 0; }
+  .config-archivo input[type="file"] { width: auto; flex: 1 1 14rem; margin: 0; }
+  .config-archivo br { display: none; }
+  .config-color { display: flex; align-items: center; gap: 0.6rem; }
+  .config-color input[type="color"] {
+    width: 64px; height: 40px; padding: 0.2rem; margin: 0; flex: 0 0 auto;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+    background: var(--surface); cursor: pointer;
+  }
+  .config-hex {
+    font-family: var(--font-mono); font-size: 0.78rem; font-weight: 700;
+    color: var(--ink); background: var(--surface-alt);
+    border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+    padding: 0.2rem 0.5rem;
+  }
+  .config-muestra { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.9rem; }
+  .config-muestra-chip {
+    font-family: var(--font-mono); font-size: 0.66rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.045em; color: #fff;
+    padding: 0.4rem 0.7rem; border-radius: var(--radius-sm);
+  }
+  .config-muestra-chip-claro { border: 1px solid var(--border-strong); }
+  .card > form > button[type="submit"] { margin-top: 1.6rem; }
+
+  /* Etiqueta solo para lectores de pantalla. */
+  .sr-solo {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+
+  /* Pestañas de Gestión: tarjetas pineadas en la cartelera, no pestañas de carpeta. */
+  .tarjetas { display: flex; gap: 1rem; flex-wrap: wrap; }
+  .tarjeta-enlace {
+    position: relative;
+    display: block;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 1.2rem 1.3rem 1rem;
+    text-decoration: none;
+    color: var(--ink);
+    font-weight: 700;
+    min-width: 150px;
+    transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+  }
+  .tarjeta-enlace::before {
+    content: ""; position: absolute; top: -5px; left: 1.3rem;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 1px 3px rgba(24,36,32,0.25);
+  }
+  .tarjeta-enlace:hover { border-color: var(--accent); box-shadow: var(--shadow-lift); transform: translateY(-3px); color: var(--ink); }
+  .tarjeta-enlace .num { display: block; font-family: var(--font-mono); font-size: 1.6rem; color: var(--accent); margin-bottom: 0.15rem; }
+
+  .aviso {
+    background: var(--surface-alt); color: var(--ink-soft);
+    padding: 0.75rem 1rem; border-radius: var(--radius-sm);
+    border: 1px dashed var(--border-strong); font-size: 0.85rem; margin-bottom: 1.2rem;
+  }
+  /* Cifra de cupos ocupados: es un dato, así que va en monoespaciada. */
+  .cupo-contador { font-family: var(--font-mono); font-weight: 700; color: var(--ink); }
+  .sin-cupo { color: var(--ink-faint); font-size: 0.85rem; }
+
+  /* Móvil primero en la práctica: la mayoría de las visitas de este producto
+     entran desde el celular (ver PRODUCT.md), así que estas reglas suben el
+     tamaño de toque por encima del mínimo de 44px recomendado y evitan que
+     nada dependa de :hover. */
+  @media (max-width: 640px) {
+    main { margin: 1.25rem auto 2.5rem; padding: 0 1rem; }
+    header { padding: 0.8rem 1.1rem; }
+    header nav a { padding: 0.85rem 0.75rem; min-height: 44px; display: inline-flex; align-items: center; }
+    header nav form { margin-left: 0.3rem; }
+    .btn { padding: 0.75rem 1.15rem; }
+    .btn-sm { padding: 0.6rem 0.9rem; }
+    .btn-texto { padding: 0.5rem 0; }
+    .card, .form-card { padding: 1.25rem 1.15rem; }
+    table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .tarjetas { gap: 0.6rem; }
+    .tarjeta-enlace { min-width: 130px; flex: 1 1 130px; }
+    .dash-grid-2 { grid-template-columns: 1fr; gap: 1.5rem; }
+    .stat-bar-etiqueta { flex-basis: 96px; }
+    .dash-promotorias { margin-left: 0.8rem; padding-left: 0.6rem; }
+    .dash-promotorias .stat-bar-etiqueta { flex-basis: 84px; }
+  }
+</style>
+{% comment %}
+Marca configurable: sobreescribe SOLO el acento y sus dos tonos derivados.
+El resto del sistema de diseño (neutros, estados, colores de Área) no se toca.
+Va con {% comment %} y no con la sintaxis de almohadilla porque esa solo
+funciona en una sola línea: repartida en varias, Django la imprime como texto.
+{% endcomment %}
+<style>
+  :root {
+    --accent: {{ configuracion.color_acento }};
+    --accent-dark: {{ configuracion.color_acento_oscuro }};
+    --accent-soft: {{ configuracion.color_acento_suave }};
+  }
+</style>
+</head>
+<body>
+<!--
+THESIS: Una matrícula no es un formulario que cae en una base de datos, es un cupo pineado en la cartelera del propio estudio — así se muestra.
+OWN-WORLD: Fondo blanco-pizarra, tinta carbón, un verde esmeralda como único color de marca/acción, y un set de colores de etiqueta rotando por Área (música/danza/teatro/pintura...) como marcadores de color distintos. El estado se lee por FORMA de marcador: pin sólido con punto (activa), contorno punteado (pendiente, "todavía no pineado"), tachado (retirada) — nunca solo color. Las tarjetas son rectángulos de esquina suave con una sola sombra nítida, como una ficha pineada en la pared, nunca una hoja plana de carpeta.
+STORY: El público ve su cupo pineado en una cartelera real en cuanto se inscribe — punteado hasta que el profesor lo confirma, sólido en cuanto lo reclama; el personal escanea la cartelera como escanearía la pared real de su estudio, repartiendo fichas en grupos en vez de llenar filas de hoja de cálculo.
+FIRST VIEWPORT: La cabecera es un riel claro de cartelera (blanco, borde inferior fino, acento esmeralda en el enlace activo); el panel abre sobre una parrilla de fichas pineadas, cada una con su punto de color de Área y su marcador de estado.
+FORM: Cartelera de estudio (community class bulletin/schedule board) — candidato 3/7, seed key 14f6aec3.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+-->
+<header>
+  <div class="marca-header">
+    <img src="{% if configuracion.logo %}{% url 'logo_institucion' %}{% else %}{% static 'matriculas/img/logo.webp' %}{% endif %}" alt="" width="30" height="30">
+    <h1>Matrículas {{ configuracion.nombre_institucion }}</h1>
+  </div>
+  <nav>
+    {% if user.is_authenticated %}
+      {% if user.perfil.rol == "estudiante" %}
+        <a href="{% url 'promotorias_disponibles' %}">Promotorías disponibles</a>
+        <a href="{% url 'mis_matriculas' %}">Mis matrículas</a>
+        <a href="{% url 'mis_companeros' %}">Mis compañeros</a>
+      {% elif user.perfil.rol %}
+        <a href="{% url 'panel' %}">Panel</a>
+      {% endif %}
+      {% if user.perfil.rol == "director" or user.perfil.rol == "administrador" %}
+        <a href="{% url 'gestion_inicio' %}">Gestión</a>
+      {% endif %}
+      {% if user.perfil %}
+        <a href="{% url 'mi_perfil' %}">Mi perfil</a>
+      {% endif %}
+      <form action="{% url 'logout' %}" method="post" style="display:inline">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-blanco btn-sm">Cerrar sesión ({{ user.username }})</button>
+      </form>
+    {% endif %}
+  </nav>
+</header>
+<main>
+  {% if messages %}
+  <ul class="messages">
+    {% for message in messages %}
+      <li class="{{ message.tags }}">{{ message }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

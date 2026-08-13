@@ -1,0 +1,39 @@
+{% extends "matriculas/base.html" %}
+{% load matriculas_extras %}
+
+{% block title %}{{ titulo }}{% endblock %}
+
+{% block content %}
+{% if migas %}
+<p class="migas">
+  {% for m in migas %}<a href="{{ m.url }}">{{ m.texto }}</a><span class="migas-sep">/</span>{% endfor %}<span class="migas-actual">{{ titulo }}</span>
+</p>
+{% else %}
+<a href="{% url 'gestion_inicio' %}" class="volver">&larr; Gestión</a>
+{% endif %}
+<h2>{{ titulo }}</h2>
+<p><a class="btn" href="{% url url_nuevo %}{% if preset_campo %}?{{ preset_campo }}={{ preset_valor }}{% endif %}">+ Nuevo</a></p>
+
+{% if not object_list %}
+  <p class="vacio">Todavía no hay nada aquí.</p>
+{% else %}
+<table>
+  <tbody>
+    {% for obj in object_list %}
+    <tr>
+      <td>
+        {% if mostrar_tag_area %}<span class="tag-dot {{ obj|tag_color }}"></span>{% endif %}
+        {% if url_fila %}<a href="{% url url_fila obj.pk %}">{{ obj }}</a>{% else %}{{ obj }}{% endif %}
+        {% if etiqueta_plural %}<span class="campo-info" style="margin:0;display:inline;">— {{ obj.total_hijos }} {% if obj.total_hijos == 1 %}{{ etiqueta_singular }}{% else %}{{ etiqueta_plural }}{% endif %}</span>{% endif %}
+      </td>
+      <td style="text-align:right;white-space:nowrap;">
+        <a href="{% url url_editar obj.pk %}">Editar</a>
+        &nbsp;·&nbsp;
+        <a href="{% url url_eliminar obj.pk %}" style="color:var(--danger);">Eliminar</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

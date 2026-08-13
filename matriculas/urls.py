@@ -1,0 +1,65 @@
+from django.urls import path
+
+from . import views, views_gestion
+
+urlpatterns = [
+    path("", views.promotorias_disponibles, name="promotorias_disponibles"),
+    path("post-login/", views.post_login_redirect, name="post_login_redirect"),
+    path("registro/", views.registro, name="registro"),
+    path("inscripcion/", views.inscripcion, name="inscripcion"),
+    path("pendiente-aprobacion/", views.pendiente_aprobacion, name="pendiente_aprobacion"),
+    path("matricular/<int:promotoria_id>/", views.matricular, name="matricular"),
+    path("renovar/", views.renovar_matricula, name="renovar_matricula"),
+    path("mis-matriculas/", views.mis_matriculas, name="mis_matriculas"),
+    path("mis-matriculas/<int:matricula_id>/retirar/", views.retirar_matricula, name="retirar_matricula"),
+    path("mis-companeros/", views.mis_companeros, name="mis_companeros"),
+    path("panel/", views.panel, name="panel"),
+    path("panel/estudiante/<int:perfil_id>/", views.detalle_estudiante, name="detalle_estudiante"),
+    path("panel/promotoria/<int:promotoria_id>/grupos/nuevo/", views.panel_grupo_nuevo, name="panel_grupo_nuevo"),
+    path("panel/grupos/<int:grupo_id>/editar/", views.panel_grupo_editar, name="panel_grupo_editar"),
+    path("panel/grupos/<int:grupo_id>/eliminar/", views.panel_grupo_eliminar, name="panel_grupo_eliminar"),
+    path("panel/matriculas/<int:matricula_id>/asignar-grupo/", views.panel_asignar_grupo, name="panel_asignar_grupo"),
+    path("panel/matriculas/<int:matricula_id>/confirmar/", views.panel_confirmar_matricula, name="panel_confirmar_matricula"),
+    path("panel/matriculas/<int:matricula_id>/rechazar/", views.panel_rechazar_matricula, name="panel_rechazar_matricula"),
+    path("panel/promotoria/<int:promotoria_id>/cupo/", views.panel_cupo_promotoria, name="panel_cupo_promotoria"),
+    path("documento/<int:datos_estudiante_id>/", views.descargar_documento, name="descargar_documento"),
+    path("foto/<int:perfil_id>/", views.ver_foto, name="ver_foto"),
+    path("logo/", views.logo_institucion, name="logo_institucion"),
+    path("mi-perfil/", views.mi_perfil, name="mi_perfil"),
+
+    # Gestión del catálogo académico (director / administrador)
+    path("gestion/", views_gestion.GestionInicioView.as_view(), name="gestion_inicio"),
+    path("gestion/estadisticas/", views_gestion.estadisticas, name="gestion_estadisticas"),
+    path("gestion/institucion/", views_gestion.configuracion_institucion, name="gestion_configuracion"),
+    path("gestion/matriculas/", views_gestion.ventana_matriculas, name="gestion_matriculas"),
+    path("gestion/cupos/", views_gestion.cupos_periodo, name="gestion_cupos"),
+    path("gestion/cupos/<int:periodo_id>/", views_gestion.cupos_periodo, name="gestion_cupos_periodo"),
+
+    path("gestion/areas/", views_gestion.AreaListView.as_view(), name="area_lista"),
+    path("gestion/areas/nueva/", views_gestion.AreaCreateView.as_view(), name="area_nueva"),
+    path("gestion/areas/<int:pk>/editar/", views_gestion.AreaUpdateView.as_view(), name="area_editar"),
+    path("gestion/areas/<int:pk>/eliminar/", views_gestion.AreaDeleteView.as_view(), name="area_eliminar"),
+    path("gestion/areas/<int:area_id>/promotorias/", views_gestion.PromotoriasPorAreaView.as_view(), name="promotorias_por_area"),
+
+    path("gestion/periodos/", views_gestion.PeriodoListView.as_view(), name="periodo_lista"),
+    path("gestion/periodos/nuevo/", views_gestion.PeriodoCreateView.as_view(), name="periodo_nuevo"),
+    path("gestion/periodos/<int:pk>/editar/", views_gestion.PeriodoUpdateView.as_view(), name="periodo_editar"),
+    path("gestion/periodos/<int:pk>/eliminar/", views_gestion.PeriodoDeleteView.as_view(), name="periodo_eliminar"),
+
+    path("gestion/promotorias/", views_gestion.PromotoriaListView.as_view(), name="promotoria_lista"),
+    path("gestion/promotorias/nueva/", views_gestion.PromotoriaCreateView.as_view(), name="promotoria_nueva"),
+    path("gestion/promotorias/<int:pk>/editar/", views_gestion.PromotoriaUpdateView.as_view(), name="promotoria_editar"),
+    path("gestion/promotorias/<int:pk>/eliminar/", views_gestion.PromotoriaDeleteView.as_view(), name="promotoria_eliminar"),
+    path("gestion/promotorias/<int:promotoria_id>/grupos/", views_gestion.GruposPorPromotoriaView.as_view(), name="grupos_por_promotoria"),
+
+    path("gestion/grupos/", views_gestion.GrupoListView.as_view(), name="grupo_lista"),
+    path("gestion/grupos/nuevo/", views_gestion.GrupoCreateView.as_view(), name="grupo_nuevo"),
+    path("gestion/grupos/<int:pk>/editar/", views_gestion.GrupoUpdateView.as_view(), name="grupo_editar"),
+    path("gestion/grupos/<int:pk>/eliminar/", views_gestion.GrupoDeleteView.as_view(), name="grupo_eliminar"),
+    path("gestion/grupos/<int:grupo_id>/estudiantes/", views_gestion.grupo_estudiantes, name="grupo_estudiantes"),
+
+    path("gestion/usuarios/", views_gestion.UsuarioListView.as_view(), name="usuario_lista"),
+    path("gestion/usuarios/nuevo/", views_gestion.usuario_nuevo, name="usuario_nuevo"),
+    path("gestion/usuarios/<int:perfil_id>/editar/", views_gestion.usuario_editar, name="usuario_editar"),
+    path("gestion/usuarios/<int:perfil_id>/alternar-activo/", views_gestion.usuario_alternar_activo, name="usuario_alternar_activo"),
+]

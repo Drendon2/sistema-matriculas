@@ -1,0 +1,79 @@
+# Product
+
+<!-- impeccable:product-schema 1 -->
+
+## Platform
+
+web
+
+## Users
+
+Two groups sharing one system:
+
+- **El público en general** (niños, jóvenes y adultos de la comunidad, incluyendo menores de edad) que se autorregistra para matricularse en promotorías artísticas (música, danza, teatro, pintura, etc.) desde su casa o celular, sin necesidad de ir presencialmente.
+- **Personal de la Casa de la Cultura** — profesores, directores de escuela y administradores — que confirma matrículas, arma grupos según horario/cupo, y administra el catálogo académico (áreas, periodos, promotorías, grupos, usuarios).
+
+Las cuentas nuevas de autorregistro (`registro/`) quedan sin rol hasta que un director o administrador se lo asigna; la inscripción de estudiante (`inscripcion/`) asigna el rol "estudiante" de una vez y deja la matrícula "pendiente" de confirmación.
+
+## Product Purpose
+
+Sistema de matrículas para la Casa de la Cultura, una entidad pública. Reemplaza un proceso manual en papel/hojas de cálculo para inscribir personas en promotorías artísticas, repartirlas en grupos con horario, y llevar el registro demográfico y documental que la entidad debe reportar y proteger.
+
+Éxito significa: el público puede inscribirse sin fricción incluso con acceso digital limitado; el personal puede confirmar matrículas, armar grupos por cupo/horario y mantener el catálogo sin depender de papel; y la información sensible (documento de identidad, encuesta demográfica, datos de menores) queda protegida y visible solo para quien corresponde.
+
+## Positioning
+
+La matrícula es en dos pasos: el estudiante se inscribe en una **promotoría** —o en dos, que es el tope por periodo— sin elegir horario, y **después** el profesor de esa promotoría crea los **grupos** según su propia disponibilidad y reparte ahí a los ya matriculados. Ninguna matrícula nueva es válida hasta que el profesor (o director/administrador) la confirma.
+
+Las reglas de visibilidad por campo (quién ve nombre/foto, quién ve edad/teléfono/acudiente, quién ve la encuesta, quién ve la copia del documento) se aplican de forma estricta y distinta por rol — no es un sistema de matrícula genérico, sino uno construido alrededor de privacidad diferenciada y cumplimiento legal (Ley 1581 de Colombia / habeas data).
+
+## Operating Context
+
+- Periodos de matrícula semestrales (`Periodo`), con **uno solo en curso a la vez**, garantizado por un índice único parcial en PostgreSQL (`un_solo_periodo_activo`) y no solo por convención. De `Periodo.en_curso()` cuelgan la ventana de matrículas, el retiro y la renovación; con dos activos esa función devolvería una fila arbitraria. Cambiar cuál está en curso es una acción propia en **Gestión → Iniciar / finalizar matrículas** (`Periodo.poner_en_curso`), que desactiva el anterior y le cierra las matrículas en la misma transacción. Por eso `activo` no aparece en el formulario de editar periodo ni es editable en el admin de Django.
+- **La Casa de la Cultura no recibe matrículas todo el año**, solo al principio y a mitad. Por eso `Periodo` separa dos cosas: `activo` (cuál es el periodo en curso, el que ven todas las pantallas) y `matriculas_abiertas` (si ahora mismo se admite gente). Director y administrador abren y cierran esa ventana desde **Gestión → Iniciar / finalizar matrículas**. Cerrarla no toca ninguna matrícula existente: solo deja de entrar gente nueva.
+- **Hay estudiantes nuevos y estudiantes antiguos (regulares).** El nuevo crea cuenta y llena la encuesta demográfica (`inscripcion/`). El antiguo —quien tuvo al menos una matrícula activa en un periodo anterior— **no vuelve a inscribirse**: renueva desde su cuenta (`renovar/`) marcando en qué promotorías sigue y respondiendo una **encuesta de satisfacción** sobre el periodo que cursó. La renovación toma el último periodo en el que estuvo activo, así que quien se saltó un semestre puede renovar igual. La matrícula renovada nace `pendiente`, como cualquier otra: el profesor la confirma.
+- **Antiguo y nuevo no son etiquetas de la persona, sino de la relación con cada promotoría.** En la misma pantalla de renovación el estudiante puede dejar una promotoría (o las dos) y escoger otras que no ha cursado: para esas entra como **nuevo**, aunque no repita cuenta ni encuesta demográfica. El panel marca cada matrícula pendiente como «Renovación» o «Nuevo aquí», que es lo que el profesor necesita para ubicarlo en el nivel de grupo adecuado.
+- Autorregistro público sin necesidad de sesión previa, tanto para inscripción de estudiante como para registro de profesor nuevo.
+- Panel de gestión interno (profesor/director/administrador) para confirmar/rechazar matrículas, crear y editar grupos, y asignar estudiantes a grupos según cupo.
+- Gestión de catálogo académico (áreas, periodos, promotorías, grupos, usuarios) reservada a director/administrador.
+- Foto de perfil y copia del documento de identidad NO se piden en los formularios públicos de autorregistro (`registro/`, `inscripcion/`): por seguridad, ningún archivo se sube desde un formulario sin autenticar. Se suben después, ya logueado, en "Mi perfil" — eso no bloquea que el profesor/director confirme la matrícula del estudiante. La copia del documento solo la puede ver el administrador.
+- Encuesta demográfica obligatoria para todos los roles, con campos sensibles (grupo étnico, discapacidad) opcionales y autorización de tratamiento de datos explícita (la otorga el acudiente cuando el titular es menor de edad). Se llena **una sola vez** (`OneToOne` con el perfil).
+- Encuesta de **satisfacción** (`EncuestaSatisfaccion`), distinta de la demográfica: evalúa un periodo concreto, se repite cada vez que un estudiante antiguo renueva, y va atada a (perfil, periodo). Cinco preguntas: satisfacción general 1-5, acompañamiento del profesor 1-5, si el horario le funcionó, si recomendaría la promotoría, y un comentario libre opcional (el único campo no obligatorio).
+
+## Capabilities and Constraints
+
+- Los menores de edad deben tener un acudiente registrado antes de poder matricularse; el sistema lo exige a nivel de reglas de negocio.
+- Un estudiante no puede tener más de una matrícula activa para la misma promotoría en el mismo periodo.
+- **Retirarse es autoservicio, y solo del periodo en curso:** desde "Mis matrículas" el estudiante se retira de una matrícula `activa` o `pendiente` sin pedir permiso al profesor. Un periodo terminado es historial cerrado: sus matrículas muestran «Periodo terminado» en vez del botón, y el servidor rechaza el intento aunque se fuerce la petición. La fila no se borra: queda como `retirada` con su fecha original, y pierde el grupo asignado. Retirarse libera el cupo en las tres reglas a la vez (límite de 2 promotorías, ranura, cupo de la promotoría).
+- **Volver a una promotoría de la que se retiró reactiva la matrícula existente**, no crea otra: la restricción `unica_matricula_por_periodo` solo admite una fila por (estudiante, promotoría, periodo). El estado vuelve a `pendiente` y el profesor debe confirmarla de nuevo; la fecha original se conserva. La reactivación pasa por las mismas validaciones que una matrícula nueva, así que puede quedar bloqueada si entretanto se llenó el cupo de la promotoría o el estudiante ya ocupa sus 2 cupos.
+- Un estudiante puede estar en un máximo de **2 promotorías por periodo**. Cuentan las matrículas pendientes y activas —una solicitud pendiente ya ocupa cupo, para que nadie pida un tercero mientras espera confirmación—; las retiradas y las rechazadas liberan el cupo. La garantía es de la **base de datos**, no solo de la aplicación: cada matrícula ocupa una `ranura` (1 o 2) y un índice único parcial sobre (estudiante, periodo, ranura) —limitado a las no retiradas— hace imposible una tercera. El sistema asigna la ranura solo; nadie la edita a mano. Encima de eso, el panel interno comprueba el cupo antes de confirmar, para dar un mensaje claro en vez de un error de integridad.
+- Un grupo no puede recibir más estudiantes activos que su `cupo_maximo`.
+- Cada **promotoría** tiene un cupo máximo **por periodo** (`CupoPromotoria`), no un número fijo: al abrir matrículas se reparten los cupos del periodo nuevo sin borrar los del anterior, así el histórico queda reconstruible. Una promotoría sin cupo definido para el periodo no tiene tope — es el estado por defecto y no bloquea a nadie. Ocupan cupo las matrículas pendientes y activas (una solicitud sin confirmar ya reserva sitio, para que el profesor no acabe rechazando una lista de espera entera); las retiradas lo liberan. Lo edita el **profesor** sobre las promotorías que dicta, desde el Panel, y el **director/administrador** sobre cualquiera, desde Gestión → Cupos por promotoría, que reparte todos los cupos de un periodo en una sola pantalla. Bajar el cupo por debajo de lo ya ocupado está permitido y no retira a nadie: solo impide entradas nuevas, y el sistema lo avisa. El tope lo garantiza un **trigger de PostgreSQL** (`cupo_promotoria_disponible`), no solo la capa de aplicación: bloquea la fila del cupo con `FOR UPDATE`, así dos solicitudes simultáneas por el último sitio se serializan y solo una entra. El trigger solo se aplica a las operaciones que **suman** ocupación (crear, reactivar una retirada, mover de promotoría/periodo); confirmar, rechazar o asignar grupo nunca se bloquean, para que bajar el cupo no deje al personal sin poder tocar lo que ya existe.
+- Visibilidad por campo, aplicada en las vistas (no en el modelo): nombre/foto para admin, director, profesor y compañeros de la misma promotoría; edad/teléfono/acudiente para admin, director y el profesor de esa promotoría; encuesta demográfica solo para el dueño de la cuenta y el administrador; copia del documento de identidad solo para el administrador.
+- Stack: Django + PostgreSQL, en español (idioma único de la interfaz).
+
+## Brand Commitments
+
+La marca **no está quemada en el código**: `ConfiguracionInstitucion` (singleton, pk=1) guarda nombre, logo y color de acento, editables en **Gestión → Institución** (solo administrador; no director, porque es la identidad de la entidad y no catálogo académico). Un context processor la inyecta en todas las plantillas. El mismo proyecto sirve para otra institución sin tocar plantillas.
+
+Del `color_acento` se derivan en Python los otros dos tonos (`--accent-dark` para hover, `--accent-soft` para foco y fondos de éxito), con los parámetros medidos sobre el par verde original — así el default reproduce el look que ya existía y cualquier marca nueva conserva la relación entre los tres. El resto del sistema de diseño (neutros, estados, colores de etiqueta por Área) es independiente de la marca y no cambia.
+
+
+Logo oficial confirmado (2026-08-09): un emblema circular — anillo dorado/ámbar, silueta de una bailarina en ámbar con los brazos en alto, envuelta por una cinta en verde, rojo y amarillo. Todavía no está guardado como archivo en el repositorio (pendiente que el usuario lo entregue); una vez esté disponible reemplaza el sello circular "CC" provisional de `base_publico.html`.
+
+El resto del look ("La Cartelera del Estudio": blanco-pizarra, tinta carbón, verde esmeralda de acento, colores de etiqueta por Área — ver DESIGN.md) fue una paleta propuesta sin marca oficial confirmada. Con el logo real ya conocido, evaluar si el acento de marca debería migrar hacia los colores del logo (dorado/ámbar, rojo, verde) en vez del verde esmeralda actual — decisión pendiente de discutir con el usuario, no aplicar unilateralmente.
+
+## Evidence on Hand
+
+Ninguna evidencia real (logo, testimonios, datos de uso, cifras de matrícula) confirmada todavía. No inventar cifras de adopción, testimonios ni datos de la institución real en trabajo futuro.
+
+## Product Principles
+
+1. La autoinscripción pública debe funcionar sin fricción para personas con acceso digital limitado — no asumir alta alfabetización digital ni conexión rápida.
+2. Ninguna matrícula cuenta como real hasta que el personal la confirma; el flujo debe dejar claro en todo momento qué está pendiente y qué está activo.
+3. La visibilidad de datos sensibles (documento, encuesta, datos de menores) es diferenciada por rol y debe permanecer estricta en cualquier pantalla nueva.
+4. El sistema sirve tanto al autoservicio del público como a la operación diaria del personal — ambos caminos son de primera clase, no uno secundario del otro.
+
+## Accessibility & Inclusion
+
+El público incluye menores de edad y personas con acceso digital variable (posible uso desde celular, posible baja alfabetización digital). Ningún requisito de accesibilidad formal (WCAG u otro estándar) confirmado todavía.

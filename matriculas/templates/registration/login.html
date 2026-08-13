@@ -1,0 +1,29 @@
+{% extends "matriculas/base_publico.html" %}
+
+{% block title %}Iniciar sesión — {{ configuracion.nombre_institucion }}{% endblock %}
+{% block ancho %}360px{% endblock %}
+
+{% block caja %}
+  <h1>Iniciar sesión</h1>
+
+  {% if messages %}
+  <ul class="messages">
+    {% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+
+  <form method="post">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <label for="{{ form.username.id_for_label }}">Usuario</label>
+    {{ form.username }}
+    {{ form.username.errors }}
+    <label for="{{ form.password.id_for_label }}">Contraseña</label>
+    {{ form.password }}
+    {{ form.password.errors }}
+    <input type="hidden" name="next" value="{{ next }}">
+    <button type="submit">Iniciar sesión</button>
+  </form>
+  <p class="enlace-pie">¿Eres profesor y no tienes cuenta? <a href="{% url 'registro' %}">Regístrate aquí</a></p>
+  <p class="enlace-pie">¿Eres estudiante nuevo? <a href="{% url 'inscripcion' %}">Inscríbete aquí</a></p>
+{% endblock %}

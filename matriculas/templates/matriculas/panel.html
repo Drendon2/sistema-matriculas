@@ -1,0 +1,24 @@
+{% extends "matriculas/base.html" %}
+{% load matriculas_extras %}
+
+{% block title %}Panel{% endblock %}
+
+{% block content %}
+<h2>Panel de promotorías</h2>
+
+{% if not datos %}
+  <p class="vacio">No hay promotorías para mostrar todavía.</p>
+{% else %}
+  {% for item in datos %}
+  <details class="panel-item">
+    <summary class="panel-item-resumen">
+      <span class="tag-dot {{ item.promotoria.area|tag_color }}"></span>{{ item.promotoria.nombre }}
+      <span style="color:var(--ink-faint);font-weight:400;">({{ item.promotoria.area }})</span>
+      {% if item.pendientes %}<span class="estado estado-pendiente">{{ item.pendientes|length }} pendiente{{ item.pendientes|length|pluralize }}</span>{% endif %}
+      <svg class="perfil-seccion-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+    </summary>
+    {% include "matriculas/_panel_item_body.html" %}
+  </details>
+  {% endfor %}
+{% endif %}
+{% endblock %}

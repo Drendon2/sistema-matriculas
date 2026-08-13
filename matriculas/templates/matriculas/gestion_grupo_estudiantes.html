@@ -1,0 +1,40 @@
+{% extends "matriculas/base.html" %}
+
+{% block title %}{{ grupo }}{% endblock %}
+
+{% block content %}
+<p class="migas">
+  {% for m in migas %}<a href="{{ m.url }}">{{ m.texto }}</a><span class="migas-sep">/</span>{% endfor %}<span class="migas-actual">{{ grupo.get_nivel_display }} · {{ grupo.horario }}</span>
+</p>
+<h2>{{ grupo.get_nivel_display }} · {{ grupo.horario }} · Salón {{ grupo.salon }}</h2>
+<p class="campo-info" style="margin-top:-0.8rem;">{{ estudiantes|length }}/{{ grupo.cupo_maximo }} cupos ocupados</p>
+
+{% if not estudiantes %}
+  <p class="vacio">Todavía no hay estudiantes en este grupo.</p>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th></th><th>Nombre</th><th>Edad</th><th>Teléfono</th><th>Acudiente</th>
+      {% if user.perfil.rol == "administrador" %}<th></th>{% endif %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for e in estudiantes %}
+    <tr>
+      <td>{% if e.perfil.foto_perfil %}<img class="foto-mini" src="{% url 'ver_foto' e.perfil.id %}" alt="">{% endif %}</td>
+      <td>{{ e.perfil.nombre_completo }}</td>
+      <td>{{ e.perfil.edad }}</td>
+      <td>{{ e.perfil.telefono }}</td>
+      <td>
+        {% if e.acudiente %}{{ e.acudiente.nombre }} ({{ e.acudiente.telefono }}){% else %}<span class="vacio">—</span>{% endif %}
+      </td>
+      {% if user.perfil.rol == "administrador" %}
+      <td><a href="{% url 'detalle_estudiante' e.perfil.id %}">Ver detalle</a></td>
+      {% endif %}
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

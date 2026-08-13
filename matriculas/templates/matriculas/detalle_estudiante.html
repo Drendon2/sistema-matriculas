@@ -1,0 +1,59 @@
+{% extends "matriculas/base.html" %}
+
+{% block title %}{{ estudiante.nombre_completo }}{% endblock %}
+
+{% block content %}
+<a href="{% url 'panel' %}" class="volver">&larr; Volver al panel</a>
+<h2>Ficha de estudiante</h2>
+<div class="carne" style="margin-bottom:1.5rem;">
+  {% if estudiante.foto_perfil %}
+    <img class="carne-foto" style="width:64px;height:64px;" src="{% url 'ver_foto' estudiante.id %}" alt="">
+  {% else %}
+    <div class="carne-foto-vacia" style="width:64px;height:64px;"></div>
+  {% endif %}
+  <div class="carne-datos">
+    <div class="carne-nombre" style="font-size:1.1rem;">{{ estudiante.nombre_completo }}</div>
+    <div class="carne-detalle">Edad: {{ estudiante.edad }} · Teléfono: {{ estudiante.telefono }}</div>
+  </div>
+</div>
+
+<h3>Documento</h3>
+{% if datos_estudiante %}
+  <p>Documento de identidad: {{ datos_estudiante.documento_identidad }}</p>
+  {% if datos_estudiante.acudiente %}
+    <p>Acudiente: {{ datos_estudiante.acudiente.nombre }} ({{ datos_estudiante.acudiente.telefono }})</p>
+  {% endif %}
+  {% if datos_estudiante.copia_documento %}
+    <p><a class="btn" href="{% url 'descargar_documento' datos_estudiante.id %}">Descargar copia del documento</a></p>
+  {% else %}
+    <p class="vacio">No hay copia de documento cargada.</p>
+  {% endif %}
+{% else %}
+  <p class="vacio">Este estudiante no tiene datos de estudiante registrados.</p>
+{% endif %}
+
+<h3>Encuesta demográfica</h3>
+{% if encuesta %}
+<table style="max-width:520px;">
+  <tr><th>Género</th><td>{{ encuesta.get_genero_display }}</td></tr>
+  <tr><th>Barrio</th><td>{{ encuesta.barrio }}</td></tr>
+  <tr><th>Estrato</th><td>{{ encuesta.estrato }}</td></tr>
+  <tr><th>Nivel educativo</th><td>{{ encuesta.nivel_educativo }}</td></tr>
+  <tr><th>Ocupación</th><td>{{ encuesta.ocupacion }}</td></tr>
+  <tr><th>Grupo étnico</th><td>{{ encuesta.grupo_etnico|default:"—" }}</td></tr>
+  <tr><th>Discapacidad</th><td>{{ encuesta.discapacidad|default:"—" }}</td></tr>
+  <tr>
+    <th>Autoriza tratamiento de datos</th>
+    <td>
+      {% if encuesta.autoriza_tratamiento_datos %}
+        Sí ({{ encuesta.fecha_autorizacion|date:"d/m/Y H:i" }})
+      {% else %}
+        No
+      {% endif %}
+    </td>
+  </tr>
+</table>
+{% else %}
+  <p class="vacio">Este estudiante todavía no ha diligenciado su encuesta.</p>
+{% endif %}
+{% endblock %}

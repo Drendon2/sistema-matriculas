@@ -1,0 +1,85 @@
+{% extends "matriculas/base.html" %}
+{% load matriculas_extras %}
+
+{% block title %}Promotorías disponibles{% endblock %}
+
+{% block content %}
+<h2>Promotorías disponibles{% if periodo %} — {{ periodo.nombre }}{% endif %}</h2>
+
+{% if not periodo %}
+  <p class="vacio">No hay un periodo de matrícula activo en este momento.</p>
+{% elif not promotorias %}
+  <p class="vacio">Todavía no hay promotorías creadas.</p>
+{% else %}
+
+{% if renovables and matriculas_abiertas %}
+<div class="renovar-llamada">
+  <p>
+    Ya cursaste <strong>{{ periodo_anterior.nombre }}</strong>. No tienes que volver a inscribirte:
+    renueva tu matrícula con un botón y una encuesta corta.
+  </p>
+  <a class="btn" href="{% url 'renovar_matricula' %}">Renovar mi matrícula</a>
+</div>
+{% endif %}
+
+{% if not matriculas_abiertas %}
+<p class="aviso">
+  <strong>Las matrículas están cerradas en este momento.</strong>
+  {{ configuracion.nombre_institucion }} recibe inscripciones solo al principio y a mitad de año.
+  Tus matrículas actuales no se ven afectadas.
+</p>
+{% endif %}
+
+<p class="aviso">
+  Puedes estar en hasta {{ cupos_limite }} promotorías por periodo.
+  Llevas <span class="cupo-contador">{{ cupos_usados }} de {{ cupos_limite }}</span> cupos ocupados.
+  {% if cupos_usados >= cupos_limite %}Para entrar a otra, retira antes una de tus matrículas.{% endif %}
+</p>
+<table>
+  <thead>
+    <tr>
+      <th>Promotoría</th>
+      <th>Área</th>
+      <th>Profesor</th>
+      <th class="num">Cupo</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in promotorias %}
+    <tr>
+      <td>{{ item.promotoria.nombre }}</td>
+      <td><span class="tag-dot {{ item.promotoria.area|tag_color }}"></span>{{ item.promotoria.area }}</td>
+      <td>{{ item.promotoria.profesor.nombre_completo|default:"Sin asignar" }}</td>
+      <td class="num">
+        {% if item.cupo is None %}
+          <span class="cupo-cifra cupo-cifra-libre">{{ item.ocupados }} / ∞</span>
+        {% elif item.ocupados >= item.cupo %}
+          <span class="cupo-cifra cupo-cifra-lleno">{{ item.ocupados }} / {{ item.cupo }}</span>
+        {% else %}
+          <span class="cupo-cifra">{{ item.ocupados }} / {{ item.cupo }}</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if item.matricula %}
+          <span class="estado estado-{{ item.matricula.estado }}">{{ item.matricula.get_estado_display }}</span>
+        {% elif not matriculas_abiertas %}
+          <span class="sin-cupo">Matrículas cerradas</span>
+        {% elif item.llena %}
+          <span class="sin-cupo">Promotoría llena</span>
+        {% elif item.bloqueada %}
+          <span class="sin-cupo">Sin cupo libre</span>
+        {% else %}
+          <form action="{% url 'matricular' item.promotoria.id %}" method="post">
+            {% csrf_token %}
+            <button type="submit" class="btn">Matricularme</button>
+          </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="campo-info" style="margin-top:1rem;">Al matricularte no eliges horario: primero el profesor confirma tu inscripción, y luego te asigna un grupo según su disponibilidad.</p>
+{% endif %}
+{% endblock %}

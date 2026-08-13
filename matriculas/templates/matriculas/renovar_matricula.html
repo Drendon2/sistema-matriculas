@@ -1,0 +1,103 @@
+{% extends "matriculas/base.html" %}
+{% load matriculas_extras %}
+
+{% block title %}Renovar matrícula{% endblock %}
+
+{% block content %}
+<h2>Renovar mi matrícula — {{ periodo.nombre }}</h2>
+
+<p class="aviso">
+  Ya cursaste <strong>{{ periodo_anterior.nombre }}</strong>, así que no tienes que crear cuenta
+  ni volver a llenar tus datos. Cuéntanos cómo te fue y confirma en qué promotorías sigues.
+  Te quedan <span class="cupo-contador">{{ cupos_libres }} de {{ cupos_limite }}</span> cupos.
+</p>
+
+<form method="post">
+  {% csrf_token %}
+
+  <div class="card">
+    <h3>¿En qué promotorías sigues?</h3>
+    <p class="campo-info">
+      Desmarca la que ya no quieras cursar. Si no quieres seguir en ninguna, desmárcalas todas
+      y escoge otra abajo. El profesor confirma después, igual que una matrícula nueva.
+    </p>
+    {% for m in renovables %}
+    <label class="renovar-opcion">
+      <input type="checkbox" name="promotoria" value="{{ m.promotoria_id }}" checked>
+      <span>
+        <span class="tag-dot {{ m.promotoria.area|tag_color }}"></span>{{ m.promotoria.nombre }}
+        <span class="campo-info" style="margin:0;display:inline;">— {{ m.promotoria.area }}</span>
+      </span>
+    </label>
+    {% endfor %}
+  </div>
+
+  {% if disponibles %}
+  <div class="card">
+    <h3>¿Quieres entrar a otra?</h3>
+    <p class="campo-info">
+      Opcional. En una promotoría que no has cursado entras como estudiante nuevo, aunque no
+      tengas que crear cuenta otra vez. Entre renovadas y nuevas puedes tener hasta
+      {{ cupos_limite }} en total.
+    </p>
+
+    <label for="id_promotoria_nueva">Otra promotoría</label>
+    <select name="promotoria_nueva" id="id_promotoria_nueva">
+      <option value="">-- ninguna --</option>
+      {% for d in disponibles %}
+        <option value="{{ d.promotoria.id }}"{% if d.llena %} disabled{% endif %}>{{ d.promotoria.nombre }} ({{ d.promotoria.area }}){% if d.llena %} — sin cupo{% endif %}</option>
+      {% endfor %}
+    </select>
+
+    <label for="id_promotoria_nueva_2">Y otra más</label>
+    <select name="promotoria_nueva_2" id="id_promotoria_nueva_2">
+      <option value="">-- ninguna --</option>
+      {% for d in disponibles %}
+        <option value="{{ d.promotoria.id }}"{% if d.llena %} disabled{% endif %}>{{ d.promotoria.nombre }} ({{ d.promotoria.area }}){% if d.llena %} — sin cupo{% endif %}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
+
+  {% if ya_respondio %}
+    <p class="campo-info">Ya respondiste la encuesta de {{ periodo_anterior.nombre }}. Gracias.</p>
+  {% else %}
+  <div class="card">
+    <h3>¿Cómo te fue en {{ periodo_anterior.nombre }}?</h3>
+    {{ form.non_field_errors }}
+
+    <div class="encuesta-pregunta">
+      <p class="encuesta-enunciado">{{ form.satisfaccion_general.label }}</p>
+      <div class="encuesta-escala">{{ form.satisfaccion_general }}</div>
+      {{ form.satisfaccion_general.errors }}
+    </div>
+
+    <div class="encuesta-pregunta">
+      <p class="encuesta-enunciado">{{ form.calificacion_profesor.label }}</p>
+      <div class="encuesta-escala">{{ form.calificacion_profesor }}</div>
+      {{ form.calificacion_profesor.errors }}
+    </div>
+
+    <div class="encuesta-pregunta">
+      <p class="encuesta-enunciado">{{ form.horario_funciono.label }}</p>
+      <div class="encuesta-escala">{{ form.horario_funciono }}</div>
+      {{ form.horario_funciono.errors }}
+    </div>
+
+    <div class="encuesta-pregunta">
+      <p class="encuesta-enunciado">{{ form.recomendaria.label }}</p>
+      <div class="encuesta-escala">{{ form.recomendaria }}</div>
+      {{ form.recomendaria.errors }}
+    </div>
+
+    <div class="encuesta-pregunta">
+      <label for="{{ form.comentario.id_for_label }}">{{ form.comentario.label }}</label>
+      {{ form.comentario }}
+      {{ form.comentario.errors }}
+    </div>
+  </div>
+  {% endif %}
+
+  <p><button type="submit" class="btn">Renovar mi matrícula</button></p>
+</form>
+{% endblock %}

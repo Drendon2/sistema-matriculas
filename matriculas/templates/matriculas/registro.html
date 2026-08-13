@@ -1,0 +1,27 @@
+{% extends "matriculas/base_publico.html" %}
+
+{% block title %}Crear cuenta — {{ configuracion.nombre_institucion }}{% endblock %}
+{% block ancho %}400px{% endblock %}
+
+{% block caja %}
+  <h1>Crear cuenta</h1>
+  <p class="info">Pensado para profesores nuevos. Tu cuenta queda pendiente hasta que un director o administrador te asigne un rol.</p>
+
+  {% if messages %}
+  <ul class="messages">
+    {% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+
+  <form method="post">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for field in form %}
+      <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+      {{ field }}
+      {{ field.errors }}
+    {% endfor %}
+    <button type="submit">Crear cuenta</button>
+  </form>
+  <p class="enlace-pie"><a href="{% url 'login' %}">Ya tengo cuenta, iniciar sesión</a></p>
+{% endblock %}

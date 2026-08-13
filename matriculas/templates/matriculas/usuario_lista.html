@@ -1,0 +1,62 @@
+{% extends "matriculas/base.html" %}
+
+{% block title %}Usuarios{% endblock %}
+
+{% block content %}
+<a href="{% url 'gestion_inicio' %}" class="volver">&larr; Gestión</a>
+<h2>Usuarios</h2>
+<p><a class="btn" href="{% url 'usuario_nuevo' %}">+ Nuevo usuario</a></p>
+
+{% if not object_list %}
+  <p class="vacio">Todavía no hay usuarios.</p>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th>Nombre</th>
+      <th>Usuario</th>
+      <th>Rol</th>
+      <th>Estado</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for perfil in object_list %}
+    <tr>
+      <td>{{ perfil.nombre_completo }}</td>
+      <td>{{ perfil.usuario.username }}</td>
+      <td>
+        {% if perfil.rol %}
+          {{ perfil.get_rol_display }}
+        {% else %}
+          <span class="estado estado-pendiente">Pendiente de rol</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if perfil.usuario.is_active %}
+          <span class="estado estado-activa">Activo</span>
+        {% else %}
+          <span class="estado estado-retirada">Inactivo</span>
+        {% endif %}
+      </td>
+      <td style="text-align:right;white-space:nowrap;">
+<span class="accion-fila">
+        <a href="{% url 'usuario_editar' perfil.id %}">Editar</a>
+        {% if perfil.usuario != user %}
+        <form action="{% url 'usuario_alternar_activo' perfil.id %}" method="post" style="display:inline;">
+          {% csrf_token %}
+          {% if perfil.usuario.is_active %}
+            <button type="submit" class="btn btn-retirar btn-sm">Desactivar</button>
+          {% else %}
+            <button type="submit" class="btn btn-sm">Activar</button>
+          {% endif %}
+        </form>
+        {% endif %}
+        </span>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}
