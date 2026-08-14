@@ -868,6 +868,87 @@ def panel_asignar_grupo(request, matricula_id):
     return redirect("panel")
 
 
+def _puede_ver_ficha(solicitante, objetivo):
+    """Quién puede abrir la ficha de quién: se mira hacia abajo, no hacia los lados.
+
+    Administrador y director abren la de cualquiera. El profesor solo la de
+    estudiantes — ni la de otro profesor, ni la de un director, ni la de un
+    administrador. Un estudiante no abre ninguna: sus pantallas siguen
+    mostrando los nombres como texto (ver `mis_companeros`).
+    """
+    if solicitante.rol in ("administrador", "director"):
+        return True
+    if solicitante.rol == "profesor":
+        return objetivo.rol == "estudiante"
+    return False
+
+
+def _profesor_tiene_al_estudiante(profesor, estudiante):
+    """¿El estudiante cursa alguna promotoría de este profesor (sin retirar)?"""
+    return Matricula.objects.filter(
+        estudiante=estudiante, promotoria__profesor=profesor,
+    ).exclude(estado="retirada").exists()
+
+
+@requiere_rol(*ROLES_PANEL)
+def detalle_usuario(request, perfil_id):
+    """Ficha de una persona, sea cual sea su rol — el destino de su nombre.
+
+    Existe porque la lista de Gestión → Usuarios contiene los cuatro roles y
+    las cuentas sin rol todavía, mientras que las dos fichas que ya había solo
+    sirven para estudiantes (`historial_estudiante`, `detalle_estudiante`). Sin
+    esta pantalla, hacer clic sobre un profesor no llevaba a ninguna parte.
+
+    Funciona como el eje de las otras dos: reúne identidad y contacto, resume
+    lo que corresponde según el rol de la persona (promotorías que dicta un
+    profesor; el resumen de trayectoria de un estudiante) y enlaza desde ahí a
+    la trayectoria completa y, para el administrador, a la ficha con encuesta y
+    documento.
+
+    Quién entra lo decide `_puede_ver_ficha`. Qué se muestra, en cambio, sigue
+    la matriz de visibilidad de models.py: edad, teléfono y acudiente de un
+    estudiante son para administrador y director, y para el profesor SOLO si
+    ese estudiante cursa alguna de sus promotorías. Que un profesor pueda abrir
+    la ficha no le da acceso a los datos de contacto de cualquiera.
+    """
+    perfil = request.perfil
+    objetivo = get_object_or_404(Perfil, pk=perfil_id)
+
+    if not _puede_ver_ficha(perfil, objetivo):
+        messages.error(
+            request,
+            f"No tienes acceso a la ficha de {objetivo.nombre_completo}: "
+            "un profesor solo puede consultar la de sus estudiantes.",
+        )
+        return redirect("panel")
+
+    es_estudiante = objetivo.rol == "estudiante"
+    # El contacto es el dato acotado, no la ficha entera (ver docstring).
+    ve_contacto = perfil.rol in ("administrador", "director") or (
+        perfil.rol == "profesor"
+        and es_estudiante
+        and _profesor_tiene_al_estudiante(perfil, objetivo)
+    )
+
+    datos_estudiante = getattr(objetivo, "datos_estudiante", None) if es_estudiante else None
+
+    return render(request, "matriculas/detalle_usuario.html", {
+        "objetivo": objetivo,
+        "es_estudiante": es_estudiante,
+        "ve_contacto": ve_contacto,
+        "acudiente": datos_estudiante.acudiente if datos_estudiante and ve_contacto else None,
+        "resumen": resumen_trayectoria(objetivo) if es_estudiante else None,
+        # Un profesor "tiene" promotorías; el resto de roles no cuelga del
+        # catálogo, así que para ellos esta lista queda vacía a propósito.
+        "promotorias": (
+            Promotoria.objects.filter(profesor=objetivo)
+            .select_related("area").prefetch_related("grupos").order_by("area__nombre", "nombre")
+            if objetivo.rol == "profesor" else []
+        ),
+        "puede_gestionar_usuarios": perfil.rol in ("director", "administrador"),
+    })
+
+
 @requiere_rol(*ROLES_PANEL)
 def historial_estudiante(request, perfil_id):
     """Trayectoria de un estudiante: en qué promotorías ha estado y en cuáles sigue.

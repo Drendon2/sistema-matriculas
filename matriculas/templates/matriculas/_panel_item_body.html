@@ -1,4 +1,15 @@
-<p class="campo-info" style="margin-top:-0.6rem;">Profesor: {{ item.promotoria.profesor.nombre_completo|default:"Sin asignar" }}</p>
+{# `load` no se hereda de la plantilla que incluye a esta: va aquí también. #}
+{% load matriculas_extras %}
+
+<p class="campo-info" style="margin-top:-0.6rem;">Profesor:
+  {% if item.promotoria.profesor %}
+    {% if item.promotoria.profesor|ficha_visible_para:user.perfil %}
+      <a href="{% url 'detalle_usuario' item.promotoria.profesor.id %}">{{ item.promotoria.profesor.nombre_completo }}</a>
+    {% else %}
+      {{ item.promotoria.profesor.nombre_completo }}
+    {% endif %}
+  {% else %}Sin asignar{% endif %}
+</p>
 
 {% if periodo %}
 <div class="cupo-fila">
@@ -40,7 +51,11 @@
     {% for e in item.pendientes %}
     <tr>
       <td>{% if e.perfil.foto_perfil %}<img class="foto-mini" src="{% url 'ver_foto' e.perfil.id %}" alt="">{% endif %}</td>
-      <td><a href="{% url 'historial_estudiante' e.perfil.id %}">{{ e.perfil.nombre_completo }}</a></td>
+      <td>
+        {% if e.perfil|ficha_visible_para:user.perfil %}
+          <a href="{% url 'detalle_usuario' e.perfil.id %}">{{ e.perfil.nombre_completo }}</a>
+        {% else %}{{ e.perfil.nombre_completo }}{% endif %}
+      </td>
       <td>
         {% if e.renovacion %}
           <span class="trayectoria trayectoria-renovacion">Renovación</span>
@@ -107,7 +122,11 @@
       {% for e in g.estudiantes %}
       <tr>
         <td>{% if e.perfil.foto_perfil %}<img class="foto-mini" src="{% url 'ver_foto' e.perfil.id %}" alt="">{% endif %}</td>
-        <td><a href="{% url 'historial_estudiante' e.perfil.id %}">{{ e.perfil.nombre_completo }}</a></td>
+        <td>
+        {% if e.perfil|ficha_visible_para:user.perfil %}
+          <a href="{% url 'detalle_usuario' e.perfil.id %}">{{ e.perfil.nombre_completo }}</a>
+        {% else %}{{ e.perfil.nombre_completo }}{% endif %}
+      </td>
         <td>{{ e.perfil.edad }}</td>
         <td>{{ e.perfil.telefono }}</td>
         <td>
@@ -148,7 +167,11 @@
     {% for e in item.sin_grupo %}
     <tr>
       <td>{% if e.perfil.foto_perfil %}<img class="foto-mini" src="{% url 'ver_foto' e.perfil.id %}" alt="">{% endif %}</td>
-      <td><a href="{% url 'historial_estudiante' e.perfil.id %}">{{ e.perfil.nombre_completo }}</a></td>
+      <td>
+        {% if e.perfil|ficha_visible_para:user.perfil %}
+          <a href="{% url 'detalle_usuario' e.perfil.id %}">{{ e.perfil.nombre_completo }}</a>
+        {% else %}{{ e.perfil.nombre_completo }}{% endif %}
+      </td>
       <td>{{ e.perfil.edad }}</td>
       <td>{{ e.perfil.telefono }}</td>
       <td>

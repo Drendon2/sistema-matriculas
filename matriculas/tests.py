@@ -21,7 +21,8 @@ from django.urls import reverse
 
 from .models import (
     RANURA_MAXIMA_ABSOLUTA,
-    Area, ConfiguracionInstitucion, DatosEstudiante, EncuestaDemografica, Grupo,
+    Acudiente, Area, ConfiguracionInstitucion, DatosEstudiante,
+    EncuestaDemografica, Grupo,
     Matricula, Perfil, Periodo, Promotoria, historial_por_periodo,
     resumen_trayectoria,
 )
@@ -752,6 +753,158 @@ class EncuestaChoicesTests(TestCase):
         self.assertContains(respuesta, "Urbana")
         # El código interno no se le enseña a nadie.
         self.assertNotContains(respuesta, "tecnologo")
+
+
+class FichaUsuarioTests(TestCase):
+    """La ficha de usuario y la jerarquía de roles que decide quién la abre.
+
+    Existe porque el listado de Usuarios contiene los cuatro roles, mientras
+    que las fichas que ya había solo servían para estudiantes: al hacer clic
+    sobre un profesor no había adónde ir.
+
+    Dos reglas distintas se cruzan aquí y conviene no confundirlas: QUIÉN puede
+    abrir la ficha (jerarquía: se mira hacia abajo) y QUÉ se ve dentro de ella
+    (la matriz de visibilidad de models.py, donde el contacto de un estudiante
+    es del profesor solo si ese estudiante es suyo).
+    """
+
+    def setUp(self):
+        self.periodo = Periodo.objects.create(
+            nombre="2026-1", fecha_inicio=date(2026, 1, 15), fecha_fin=date(2026, 6, 15),
+            activo=True, matriculas_abiertas=True,
+        )
+        area = Area.objects.create(nombre="Música")
+        self.profe = self.crear("profe", "profesor", "Profe Violín")
+        self.otro_profe = self.crear("profe2", "profesor", "Profe Teatro")
+        self.director = self.crear("dire", "director", "Directora")
+        self.admin = self.crear("admin1", "administrador", "Admin")
+        self.violin = Promotoria.objects.create(
+            nombre="Violín", area=area, profesor=self.profe)
+        self.otra = Promotoria.objects.create(
+            nombre="Actuación", area=area, profesor=self.otro_profe)
+
+        self.mio = self.crear("ana", "estudiante", "Ana Ruiz")
+        self.ajeno = self.crear("beto", "estudiante", "Beto Páez")
+        DatosEstudiante.objects.create(
+            perfil=self.mio, documento_identidad="111",
+            acudiente=Acudiente.objects.create(nombre="Madre de Ana", telefono="3001"),
+        )
+        DatosEstudiante.objects.create(
+            perfil=self.ajeno, documento_identidad="222",
+            acudiente=Acudiente.objects.create(nombre="Padre de Beto", telefono="3002"),
+        )
+        self.matricular(self.mio, self.violin)
+        self.matricular(self.ajeno, self.otra)
+
+    def crear(self, username, rol, nombre):
+        usuario = User.objects.create_user(username=username, password="x")
+        return Perfil.objects.create(
+            usuario=usuario, rol=rol, nombre_completo=nombre,
+            fecha_nacimiento=date(1995, 3, 4), telefono="3000000000",
+        )
+
+    def matricular(self, perfil, promotoria):
+        matricula = Matricula(
+            estudiante=perfil, promotoria=promotoria, periodo=self.periodo, estado="activa",
+        )
+        matricula.full_clean()
+        matricula.save()
+        return matricula
+
+    def abrir(self, quien, objetivo):
+        self.client.force_login(quien.usuario)
+        return self.client.get(reverse("detalle_usuario", args=[objetivo.id]))
+
+    # -- quién puede abrir la ficha (jerarquía) -----------------------------
+
+    def test_el_administrador_abre_la_ficha_de_cualquiera(self):
+        for objetivo in (self.profe, self.director, self.admin, self.mio):
+            self.assertEqual(self.abrir(self.admin, objetivo).status_code, 200)
+
+    def test_el_director_abre_la_ficha_de_cualquiera(self):
+        for objetivo in (self.profe, self.admin, self.mio):
+            self.assertEqual(self.abrir(self.director, objetivo).status_code, 200)
+
+    def test_el_profesor_abre_la_de_un_estudiante(self):
+        self.assertEqual(self.abrir(self.profe, self.mio).status_code, 200)
+        # Incluida la de un estudiante que no es suyo: la jerarquía decide el
+        # acceso a la ficha; lo que se ve dentro lo decide la otra regla.
+        self.assertEqual(self.abrir(self.profe, self.ajeno).status_code, 200)
+
+    def test_el_profesor_no_mira_hacia_los_lados_ni_hacia_arriba(self):
+        for objetivo in (self.otro_profe, self.director, self.admin):
+            self.assertEqual(self.abrir(self.profe, objetivo).status_code, 302)
+
+    def test_un_estudiante_no_abre_ninguna(self):
+        self.assertNotEqual(self.abrir(self.mio, self.ajeno).status_code, 200)
+        self.assertNotEqual(self.abrir(self.mio, self.profe).status_code, 200)
+
+    # -- qué se ve dentro (matriz de visibilidad) ---------------------------
+
+    def test_el_profesor_ve_el_contacto_de_SU_estudiante(self):
+        respuesta = self.abrir(self.profe, self.mio)
+
+        self.assertTrue(respuesta.context["ve_contacto"])
+        self.assertContains(respuesta, "Madre de Ana")
+
+    def test_el_profesor_no_ve_el_contacto_de_un_estudiante_ajeno(self):
+        """Poder abrir la ficha no desbloquea el teléfono ni el acudiente."""
+        respuesta = self.abrir(self.profe, self.ajeno)
+
+        self.assertFalse(respuesta.context["ve_contacto"])
+        self.assertNotContains(respuesta, "Padre de Beto")
+
+    def test_el_director_ve_el_contacto_de_cualquier_estudiante(self):
+        respuesta = self.abrir(self.director, self.ajeno)
+
+        self.assertTrue(respuesta.context["ve_contacto"])
+        self.assertContains(respuesta, "Padre de Beto")
+
+    def test_la_ficha_de_un_profesor_lista_sus_promotorias(self):
+        respuesta = self.abrir(self.admin, self.profe)
+
+        self.assertContains(respuesta, "Violín")
+        self.assertNotContains(respuesta, "Actuación")
+
+    def test_solo_el_administrador_llega_a_la_encuesta_y_el_documento(self):
+        del_admin = self.abrir(self.admin, self.mio)
+        del_director = self.abrir(self.director, self.mio)
+
+        # Se comprueba la etiqueta del botón y no su URL: la de la trayectoria
+        # (/panel/estudiante/<id>/historial/) lleva dentro a la otra como
+        # prefijo, así que buscar la ruta daría un falso positivo.
+        self.assertContains(del_admin, "Ver encuesta y documento")
+        self.assertNotContains(del_director, "Ver encuesta y documento")
+        # El director sí conserva el acceso a la trayectoria.
+        self.assertContains(del_director, "Ver trayectoria completa")
+
+    # -- el nombre como enlace ----------------------------------------------
+
+    def test_en_usuarios_el_nombre_lleva_a_la_ficha(self):
+        self.client.force_login(self.admin.usuario)
+
+        respuesta = self.client.get(reverse("usuario_lista"))
+
+        self.assertContains(respuesta, reverse("detalle_usuario", args=[self.profe.id]))
+
+    def test_el_panel_no_ofrece_al_profesor_un_enlace_que_lo_rebotaria(self):
+        """El nombre solo se pinta como enlace si quien mira puede abrirlo."""
+        self.client.force_login(self.profe.usuario)
+
+        respuesta = self.client.get(reverse("panel"))
+
+        self.assertContains(respuesta, reverse("detalle_usuario", args=[self.mio.id]))
+        # El suyo propio aparece como profesor de la promotoría, y no es enlace.
+        self.assertNotContains(respuesta, reverse("detalle_usuario", args=[self.profe.id]))
+
+    def test_las_pantallas_del_estudiante_no_enlazan_a_nadie(self):
+        """Un estudiante ve nombres, nunca puertas: la matriz no le da más."""
+        self.client.force_login(self.mio.usuario)
+
+        for vista in ("mis_companeros", "promotorias_disponibles"):
+            respuesta = self.client.get(reverse(vista))
+            self.assertEqual(respuesta.status_code, 200)
+            self.assertNotContains(respuesta, "/panel/usuario/")
 
 
 class TortaTests(SimpleTestCase):

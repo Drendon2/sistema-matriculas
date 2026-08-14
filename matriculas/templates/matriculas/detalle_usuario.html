@@ -1,0 +1,129 @@
+{% extends "matriculas/base.html" %}
+{% load matriculas_extras %}
+
+{% block title %}{{ objetivo.nombre_completo }}{% endblock %}
+
+{% block content %}
+<a href="{% url 'panel' %}" class="volver">&larr; Volver al panel</a>
+<h2>Ficha de usuario</h2>
+
+<div class="carne" style="margin-bottom:1.2rem;">
+  {% if objetivo.foto_perfil %}
+    <img class="carne-foto" style="width:64px;height:64px;" src="{% url 'ver_foto' objetivo.id %}" alt="">
+  {% else %}
+    <div class="carne-foto-vacia" style="width:64px;height:64px;"></div>
+  {% endif %}
+  <div class="carne-datos">
+    <div class="carne-nombre" style="font-size:1.1rem;">{{ objetivo.nombre_completo }}</div>
+    <div class="carne-detalle">
+      {{ objetivo.usuario.username }} ·
+      {% if objetivo.rol %}{{ objetivo.get_rol_display }}{% else %}Pendiente de rol{% endif %} ·
+      {% if objetivo.usuario.is_active %}Activo{% else %}Inactivo{% endif %}
+    </div>
+  </div>
+</div>
+
+{% if not objetivo.rol %}
+  <p class="aviso">
+    Esta cuenta se creó por autorregistro y todavía no tiene rol asignado, así que su
+    titular no puede entrar al sistema. Asígnaselo desde Gestión &rarr; Usuarios.
+  </p>
+{% endif %}
+
+<h3>Contacto</h3>
+{% if ve_contacto %}
+<table style="max-width:520px;">
+  <tr><th>Edad</th><td>{{ objetivo.edad }} años</td></tr>
+  <tr><th>Teléfono</th><td>{{ objetivo.telefono }}</td></tr>
+  {% if es_estudiante %}
+  <tr>
+    <th>Acudiente</th>
+    <td>
+      {% if acudiente %}
+        {{ acudiente.nombre }} ({{ acudiente.telefono }})
+      {% elif objetivo.es_menor %}
+        <span class="vacio">Sin acudiente registrado — es menor de edad</span>
+      {% else %}
+        <span class="vacio">—</span>
+      {% endif %}
+    </td>
+  </tr>
+  {% endif %}
+</table>
+{% else %}
+  {# Ver la matriz de visibilidad en models.py: la edad, el teléfono y el
+     acudiente de un estudiante son del administrador, del director y del
+     profesor de SUS promotorías. Poder abrir la ficha no los desbloquea. #}
+  <p class="vacio">
+    Edad, teléfono y acudiente solo los ve el personal a cargo de este estudiante.
+  </p>
+{% endif %}
+
+{% if es_estudiante %}
+<h3>Trayectoria</h3>
+{% if resumen.periodos %}
+<div class="dash-resumen historial-resumen">
+  <div>
+    <span class="dash-stat-num">{{ resumen.periodos }}</span>
+    <span class="dash-stat-label">Periodo{{ resumen.periodos|pluralize }} cursado{{ resumen.periodos|pluralize }}</span>
+  </div>
+  <div>
+    <span class="dash-stat-num">{{ resumen.promotorias }}</span>
+    <span class="dash-stat-label">Promotoría{{ resumen.promotorias|pluralize }}</span>
+  </div>
+  {% if resumen.desde %}
+  <div>
+    <span class="dash-stat-num">{{ resumen.desde.nombre }}</span>
+    <span class="dash-stat-label">Desde</span>
+  </div>
+  {% endif %}
+</div>
+{% else %}
+  <p class="vacio">Todavía no ha cursado ningún periodo.</p>
+{% endif %}
+<p>
+  <a class="btn btn-secundario btn-sm" href="{% url 'historial_estudiante' objetivo.id %}">
+    Ver trayectoria completa
+  </a>
+  {% if user.perfil.rol == "administrador" %}
+  <a class="btn btn-secundario btn-sm" href="{% url 'detalle_estudiante' objetivo.id %}">
+    Ver encuesta y documento
+  </a>
+  {% endif %}
+</p>
+{% endif %}
+
+{% if objetivo.rol == "profesor" %}
+<h3>Promotorías a cargo</h3>
+{% if not promotorias %}
+  <p class="vacio">No tiene promotorías asignadas.</p>
+{% else %}
+<table>
+  <thead>
+    <tr><th>Promotoría</th><th>Departamento</th><th>Grupos</th></tr>
+  </thead>
+  <tbody>
+    {% for p in promotorias %}
+    <tr>
+      <td><span class="tag-dot {{ p.area|tag_color }}"></span>{{ p.nombre }}</td>
+      <td>{{ p.area.nombre }}</td>
+      <td>
+        {% for g in p.grupos.all %}
+          {{ g.get_nivel_display }} · {{ g.horario }}{% if not forloop.last %}<br>{% endif %}
+        {% empty %}
+          <span class="vacio">Sin grupos creados</span>
+        {% endfor %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endif %}
+
+{% if puede_gestionar_usuarios %}
+<p style="margin-top:1.5rem;">
+  <a class="btn btn-sm" href="{% url 'usuario_editar' objetivo.id %}">Editar usuario</a>
+</p>
+{% endif %}
+{% endblock %}

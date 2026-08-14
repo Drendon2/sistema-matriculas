@@ -45,7 +45,11 @@ Contexto:
           <span class="historial-area">{{ m.promotoria.area }}</span>
         </td>
         {% if modo == "personal" %}
-        <td>{{ m.promotoria.profesor.nombre_completo|default:"—" }}</td>
+        <td>
+          {% if m.promotoria.profesor|ficha_visible_para:user.perfil %}
+            <a href="{% url 'detalle_usuario' m.promotoria.profesor.id %}">{{ m.promotoria.profesor.nombre_completo }}</a>
+          {% else %}{{ m.promotoria.profesor.nombre_completo|default:"—" }}{% endif %}
+        </td>
         {% endif %}
         <td>
           {% if m.grupo %}

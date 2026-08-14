@@ -113,7 +113,13 @@
   <tbody>
     {% for perfil in object_list %}
     <tr>
-      <td>{{ perfil.nombre_completo }}</td>
+      <td>
+        {% if perfil|ficha_visible_para:user.perfil %}
+          <a href="{% url 'detalle_usuario' perfil.id %}">{{ perfil.nombre_completo }}</a>
+        {% else %}
+          {{ perfil.nombre_completo }}
+        {% endif %}
+      </td>
       <td>{{ perfil.usuario.username }}</td>
       <td>
         {% if perfil.rol %}

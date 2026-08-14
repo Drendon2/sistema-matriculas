@@ -48,7 +48,7 @@
           <span class="tag-dot {{ fila.promotoria.area|tag_color }}"></span>{{ fila.promotoria.nombre }}
           <span class="campo-info" style="margin:0;display:inline;">— {{ fila.promotoria.area }}</span>
         </td>
-        <td>{{ fila.promotoria.profesor.nombre_completo|default:"Sin asignar" }}</td>
+        <td>{% if fila.promotoria.profesor|ficha_visible_para:user.perfil %}<a href="{% url 'detalle_usuario' fila.promotoria.profesor.id %}">{{ fila.promotoria.profesor.nombre_completo }}</a>{% else %}{{ fila.promotoria.profesor.nombre_completo|default:"Sin asignar" }}{% endif %}</td>
         <td class="num">
           {% if fila.cupo is not None and fila.ocupados >= fila.cupo %}
             <span class="cupo-cifra cupo-cifra-lleno">{{ fila.ocupados }} / {{ fila.cupo }}</span>

@@ -14,6 +14,7 @@ urlpatterns = [
     path("mis-matriculas/<int:matricula_id>/retirar/", views.retirar_matricula, name="retirar_matricula"),
     path("mis-companeros/", views.mis_companeros, name="mis_companeros"),
     path("panel/", views.panel, name="panel"),
+    path("panel/usuario/<int:perfil_id>/", views.detalle_usuario, name="detalle_usuario"),
     path("panel/estudiante/<int:perfil_id>/", views.detalle_estudiante, name="detalle_estudiante"),
     path("panel/estudiante/<int:perfil_id>/historial/", views.historial_estudiante, name="historial_estudiante"),
     path("panel/promotoria/<int:promotoria_id>/grupos/nuevo/", views.panel_grupo_nuevo, name="panel_grupo_nuevo"),

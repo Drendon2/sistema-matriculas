@@ -1,4 +1,5 @@
 {% extends "matriculas/base.html" %}
+{% load matriculas_extras %}
 
 {% block title %}{{ grupo }}{% endblock %}
 
@@ -23,7 +24,11 @@
     {% for e in estudiantes %}
     <tr>
       <td>{% if e.perfil.foto_perfil %}<img class="foto-mini" src="{% url 'ver_foto' e.perfil.id %}" alt="">{% endif %}</td>
-      <td><a href="{% url 'historial_estudiante' e.perfil.id %}">{{ e.perfil.nombre_completo }}</a></td>
+      <td>
+        {% if e.perfil|ficha_visible_para:user.perfil %}
+          <a href="{% url 'detalle_usuario' e.perfil.id %}">{{ e.perfil.nombre_completo }}</a>
+        {% else %}{{ e.perfil.nombre_completo }}{% endif %}
+      </td>
       <td>{{ e.perfil.edad }}</td>
       <td>{{ e.perfil.telefono }}</td>
       <td>
