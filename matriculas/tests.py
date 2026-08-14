@@ -12,7 +12,7 @@ y `PantallaConfiguracionTests`.
 """
 
 import math
-from datetime import date
+from datetime import date, timedelta
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -21,9 +21,10 @@ from django.urls import reverse
 
 from .models import (
     RANURA_MAXIMA_ABSOLUTA,
-    Acudiente, Area, ConfiguracionInstitucion, DatosEstudiante,
+    Acudiente, Area, ConfiguracionInstitucion, CupoPromotoria, DatosEstudiante,
     EncuestaDemografica, Grupo,
     Matricula, Perfil, Periodo, Promotoria, historial_por_periodo,
+    matriculas_renovables,
     resumen_trayectoria,
 )
 from .views_gestion import (
@@ -422,7 +423,9 @@ class HistorialTests(TestCase):
             ["2026-1", "2025-1"],
         )
         # La matrícula del periodo terminado es historial cerrado: un solo botón.
-        self.assertContains(respuesta, "Retirarme", count=1)
+        # (El botón se llama "Cancelar matrícula" desde que retirarse pasa por
+        # la aprobación de un director — ver CancelacionTests.)
+        self.assertContains(respuesta, "Cancelar matrícula", count=1)
         self.assertContains(respuesta, "Periodo terminado", count=1)
 
 
@@ -753,6 +756,388 @@ class EncuestaChoicesTests(TestCase):
         self.assertContains(respuesta, "Urbana")
         # El código interno no se le enseña a nadie.
         self.assertNotContains(respuesta, "tecnologo")
+
+
+class CancelacionTests(TestCase):
+    """Cancelar una matrícula pasa por la aprobación de un director.
+
+    La regla de fondo depende de la edad, y las dos ramas persiguen cosas
+    distintas: a un MENOR se le puede rechazar la cancelación, porque la pausa
+    existe para hablar con el acudiente antes de que un niño se salga por su
+    cuenta; a un MAYOR solo se le puede aprobar, porque irse es decisión suya y
+    el paso por dirección existe para saber de qué promotorías se está yendo la
+    gente, no para retenerla.
+    """
+
+    def setUp(self):
+        self.periodo = Periodo.objects.create(
+            nombre="2026-1", fecha_inicio=date(2026, 1, 15), fecha_fin=date(2026, 6, 15),
+            activo=True, matriculas_abiertas=True,
+        )
+        area = Area.objects.create(nombre="Música")
+        self.violin = Promotoria.objects.create(nombre="Violín", area=area)
+
+        self.adulta = self.crear_estudiante("ana", "Ana Ruiz", date(1995, 3, 4))
+        self.menor = self.crear_estudiante(
+            "beto", "Beto Páez", date.today() - timedelta(days=365 * 12),
+            acudiente=Acudiente.objects.create(nombre="Madre de Beto", telefono="3001"),
+        )
+        usuario = User.objects.create_user(username="dire", password="x")
+        self.director = Perfil.objects.create(
+            usuario=usuario, rol="director", nombre_completo="Directora",
+            fecha_nacimiento=date(1980, 1, 1), telefono="3000000009",
+        )
+
+    def crear_estudiante(self, username, nombre, nacimiento, acudiente=None):
+        usuario = User.objects.create_user(username=username, password="x")
+        perfil = Perfil.objects.create(
+            usuario=usuario, rol="estudiante", nombre_completo=nombre,
+            fecha_nacimiento=nacimiento, telefono="3000000000",
+        )
+        DatosEstudiante.objects.create(
+            perfil=perfil, documento_identidad=username, acudiente=acudiente,
+        )
+        return perfil
+
+    def matricular(self, perfil, estado="activa"):
+        matricula = Matricula(
+            estudiante=perfil, promotoria=self.violin, periodo=self.periodo, estado=estado,
+        )
+        matricula.full_clean()
+        matricula.save()
+        return matricula
+
+    def pedir_cancelacion(self, perfil, matricula):
+        self.client.force_login(perfil.usuario)
+        return self.client.post(reverse("retirar_matricula", args=[matricula.id]))
+
+    def resolver(self, matricula, decision):
+        self.client.force_login(self.director.usuario)
+        return self.client.post(
+            reverse("gestion_resolver_cancelacion", args=[matricula.id, decision])
+        )
+
+    # -- pedirla ------------------------------------------------------------
+
+    def test_cancelar_una_activa_no_la_retira_todavia(self):
+        matricula = self.matricular(self.adulta)
+
+        self.pedir_cancelacion(self.adulta, matricula)
+
+        matricula.refresh_from_db()
+        self.assertEqual(matricula.estado, Matricula.ESTADO_CANCELACION)
+
+    def test_mientras_espera_sigue_ocupando_cupo(self):
+        """El cupo no se libera hasta que alguien aprueba la salida."""
+        matricula = self.matricular(self.adulta)
+        CupoPromotoria.objects.create(
+            promotoria=self.violin, periodo=self.periodo, cupo_maximo=1)
+
+        self.pedir_cancelacion(self.adulta, matricula)
+
+        self.assertEqual(self.violin.cupos_disponibles(self.periodo), 0)
+        self.assertEqual(self.violin.ocupados_en(self.periodo), 1)
+
+    def test_una_pendiente_se_cancela_en_el_acto(self):
+        """Nadie la confirmó: no es una deserción, es retirar una solicitud."""
+        matricula = self.matricular(self.adulta, estado="pendiente")
+
+        self.pedir_cancelacion(self.adulta, matricula)
+
+        matricula.refresh_from_db()
+        self.assertEqual(matricula.estado, "retirada")
+
+    # -- resolverla ---------------------------------------------------------
+
+    def test_aprobar_retira_y_libera_el_grupo(self):
+        matricula = self.matricular(self.adulta)
+        self.pedir_cancelacion(self.adulta, matricula)
+
+        self.resolver(matricula, "aprobar")
+
+        matricula.refresh_from_db()
+        self.assertEqual(matricula.estado, "retirada")
+        self.assertIsNone(matricula.grupo)
+
+    def test_a_un_menor_se_le_puede_rechazar_y_vuelve_a_activa(self):
+        matricula = self.matricular(self.menor)
+        self.pedir_cancelacion(self.menor, matricula)
+
+        self.resolver(matricula, "rechazar")
+
+        matricula.refresh_from_db()
+        self.assertEqual(matricula.estado, "activa")
+
+    def test_a_un_mayor_no_se_le_rechaza_aunque_se_fuerce_la_peticion(self):
+        """Ocultar el botón no basta: el formulario se puede enviar a mano."""
+        matricula = self.matricular(self.adulta)
+        self.pedir_cancelacion(self.adulta, matricula)
+
+        self.resolver(matricula, "rechazar")
+
+        matricula.refresh_from_db()
+        self.assertEqual(matricula.estado, Matricula.ESTADO_CANCELACION)
+
+    def test_la_pantalla_ofrece_rechazar_solo_al_menor(self):
+        de_adulta = self.matricular(self.adulta)
+        de_menor = self.matricular(self.menor)
+        self.pedir_cancelacion(self.adulta, de_adulta)
+        self.pedir_cancelacion(self.menor, de_menor)
+        self.client.force_login(self.director.usuario)
+
+        respuesta = self.client.get(reverse("gestion_cancelaciones"))
+
+        self.assertEqual(len(respuesta.context["pendientes"]), 2)
+        self.assertContains(
+            respuesta, reverse("gestion_resolver_cancelacion", args=[de_menor.id, "rechazar"]))
+        self.assertNotContains(
+            respuesta, reverse("gestion_resolver_cancelacion", args=[de_adulta.id, "rechazar"]))
+
+    def test_un_estudiante_no_entra_a_resolver_cancelaciones(self):
+        self.client.force_login(self.adulta.usuario)
+
+        respuesta = self.client.get(reverse("gestion_cancelaciones"))
+
+        self.assertNotEqual(respuesta.status_code, 200)
+
+    # -- lo que ve el profesor ----------------------------------------------
+
+    def test_el_estudiante_no_desaparece_del_panel_de_su_profesor(self):
+        """Si la cancelación lo borrara de la lista, el profesor lo perdería
+        de vista justo cuando más falta hace enterarse."""
+        usuario = User.objects.create_user(username="profe", password="x")
+        profesor = Perfil.objects.create(
+            usuario=usuario, rol="profesor", nombre_completo="Profe",
+            fecha_nacimiento=date(1985, 1, 1), telefono="3000000008",
+        )
+        self.violin.profesor = profesor
+        self.violin.save(update_fields=["profesor"])
+        matricula = self.matricular(self.adulta)
+        self.pedir_cancelacion(self.adulta, matricula)
+        self.client.force_login(usuario)
+
+        respuesta = self.client.get(reverse("panel"))
+
+        self.assertContains(respuesta, "Ana Ruiz")
+        self.assertContains(respuesta, "Pidió cancelar")
+
+
+class DesercionEstadisticasTests(TestCase):
+    """Las dos cifras de permanencia del árbol de departamentos."""
+
+    def setUp(self):
+        hoy = date.today()
+        self.previo = Periodo.objects.create(
+            nombre="anterior", fecha_inicio=hoy - timedelta(days=400),
+            fecha_fin=hoy - timedelta(days=200),
+        )
+        self.actual = Periodo.objects.create(
+            nombre="actual", fecha_inicio=hoy - timedelta(days=30),
+            fecha_fin=hoy + timedelta(days=90), activo=True, matriculas_abiertas=True,
+        )
+        area = Area.objects.create(nombre="Música")
+        self.violin = Promotoria.objects.create(nombre="Violín", area=area)
+
+        usuario = User.objects.create_user(username="admin1", password="x")
+        Perfil.objects.create(
+            usuario=usuario, rol="administrador", nombre_completo="Admin",
+            fecha_nacimiento=date(1980, 1, 1), telefono="3000000001",
+        )
+        self.client.force_login(usuario)
+
+    def estudiante(self, username):
+        usuario = User.objects.create_user(username=username, password="x")
+        perfil = Perfil.objects.create(
+            usuario=usuario, rol="estudiante", nombre_completo=username.title(),
+            fecha_nacimiento=date(1995, 1, 1), telefono="3000000000",
+        )
+        DatosEstudiante.objects.create(perfil=perfil, documento_identidad=username)
+        return perfil
+
+    def matricular(self, perfil, periodo, estado="activa"):
+        matricula = Matricula(
+            estudiante=perfil, promotoria=self.violin, periodo=periodo, estado=estado,
+        )
+        matricula.full_clean()
+        matricula.save()
+        return matricula
+
+    def fila(self):
+        respuesta = self.client.get(reverse("gestion_estadisticas"))
+        self.assertEqual(respuesta.status_code, 200)
+        return respuesta.context["arbol_departamentos"][0]["promotorias"][0]
+
+    def test_desercion_dentro_del_periodo(self):
+        """Uno de cuatro se retiró: 25% deja, 75% sigue."""
+        for i in range(3):
+            self.matricular(self.estudiante(f"sigue{i}"), self.actual)
+        self.matricular(self.estudiante("sefue"), self.actual, estado="retirada")
+
+        fila = self.fila()
+
+        self.assertEqual(fila["pct_desercion"], 25)
+        self.assertEqual(fila["pct_continuan"], 75)
+
+    def test_una_cancelacion_en_tramite_cuenta_como_que_sigue(self):
+        """Mientras nadie la apruebe, esa persona no se ha ido."""
+        self.matricular(self.estudiante("ana"), self.actual)
+        self.matricular(
+            self.estudiante("beto"), self.actual, estado=Matricula.ESTADO_CANCELACION)
+
+        fila = self.fila()
+
+        self.assertEqual(fila["pct_desercion"], 0)
+        self.assertEqual(fila["total"], 2)
+
+    def test_no_renovacion_respecto_al_periodo_anterior(self):
+        """Dos cursaron antes y solo uno volvió: 50% no volvió."""
+        vuelve = self.estudiante("vuelve")
+        self.matricular(vuelve, self.previo)
+        self.matricular(vuelve, self.actual)
+        self.matricular(self.estudiante("desaparece"), self.previo)
+
+        fila = self.fila()
+
+        self.assertEqual(fila["pct_no_renovo"], 50)
+
+    def test_sin_periodo_anterior_no_se_inventa_un_cero(self):
+        """Un 0% se leería como "no se fue nadie", que es lo contrario."""
+        self.previo.delete()
+        self.matricular(self.estudiante("ana"), self.actual)
+
+        respuesta = self.client.get(reverse("gestion_estadisticas"))
+
+        self.assertIsNone(respuesta.context["periodo_previo"])
+        self.assertIsNone(respuesta.context["arbol_departamentos"][0]["promotorias"][0]["pct_no_renovo"])
+
+    def test_el_arbol_se_acota_al_periodo_en_curso(self):
+        """Mezclar periodos haría que las cifras de permanencia no signifiquen nada."""
+        self.matricular(self.estudiante("viejo"), self.previo)
+        self.matricular(self.estudiante("nuevo"), self.actual)
+
+        self.assertEqual(self.fila()["total"], 1)
+
+
+class EstadoFinalizadaTests(TestCase):
+    """El tercer estado del historial: "Finalizada".
+
+    No es un valor guardado y no está en `Matricula.ESTADOS` a propósito: se
+    deduce del calendario. Convertirlo en un cuarto valor real habría obligado
+    a migrar las filas y a rehacer `matriculas_renovables`, que busca
+    precisamente matrículas ACTIVAS de periodos anteriores — con las filas
+    migradas, ningún estudiante antiguo podría renovar. Hay una prueba abajo
+    que fija justo eso.
+    """
+
+    def setUp(self):
+        hoy = date.today()
+        self.terminado = Periodo.objects.create(
+            nombre="pasado", fecha_inicio=hoy - timedelta(days=400),
+            fecha_fin=hoy - timedelta(days=200),
+        )
+        self.en_curso = Periodo.objects.create(
+            nombre="actual", fecha_inicio=hoy - timedelta(days=30),
+            fecha_fin=hoy + timedelta(days=90), activo=True, matriculas_abiertas=True,
+        )
+        self.futuro = Periodo.objects.create(
+            nombre="futuro", fecha_inicio=hoy + timedelta(days=120),
+            fecha_fin=hoy + timedelta(days=300),
+        )
+        area = Area.objects.create(nombre="Música")
+        self.violin = Promotoria.objects.create(nombre="Violín", area=area)
+        self.guitarra = Promotoria.objects.create(nombre="Guitarra", area=area)
+
+        usuario = User.objects.create_user(username="ana", password="x")
+        self.ana = Perfil.objects.create(
+            usuario=usuario, rol="estudiante", nombre_completo="Ana Ruiz",
+            fecha_nacimiento=date(1995, 3, 4), telefono="3000000000",
+        )
+        DatosEstudiante.objects.create(perfil=self.ana, documento_identidad="123")
+
+    def matricular(self, promotoria, periodo, estado="activa"):
+        matricula = Matricula(
+            estudiante=self.ana, promotoria=promotoria, periodo=periodo, estado=estado,
+        )
+        matricula.full_clean()
+        matricula.save()
+        return matricula
+
+    # -- cuándo un periodo cuenta como terminado ----------------------------
+
+    def test_un_periodo_futuro_no_esta_terminado(self):
+        """Mirar solo `activo` lo habría dado por terminado sin haber empezado."""
+        self.assertFalse(self.futuro.termino)
+
+    def test_el_periodo_en_curso_no_esta_terminado_aunque_se_pase_de_fecha(self):
+        """El personal se retrasa en cerrar y la pantalla sigue admitiendo retiros."""
+        self.en_curso.fecha_fin = date.today() - timedelta(days=5)
+        self.en_curso.save(update_fields=["fecha_fin"])
+
+        self.assertFalse(self.en_curso.termino)
+
+    def test_un_periodo_pasado_si_esta_terminado(self):
+        self.assertTrue(self.terminado.termino)
+
+    # -- qué estado se muestra ----------------------------------------------
+
+    def test_una_activa_de_un_periodo_cerrado_se_lee_finalizada(self):
+        matricula = self.matricular(self.violin, self.terminado)
+
+        self.assertEqual(matricula.estado, "activa")          # lo guardado no cambia
+        self.assertEqual(matricula.estado_visible, "finalizada")
+        self.assertEqual(matricula.estado_visible_display, "Finalizada")
+
+    def test_una_activa_del_periodo_en_curso_sigue_activa(self):
+        matricula = self.matricular(self.violin, self.en_curso)
+
+        self.assertEqual(matricula.estado_visible, "activa")
+
+    def test_una_pendiente_de_un_periodo_cerrado_sigue_pendiente(self):
+        """Nadie la confirmó: decir que finalizó sería inventarse un desenlace."""
+        matricula = self.matricular(self.violin, self.terminado, estado="pendiente")
+
+        self.assertEqual(matricula.estado_visible, "pendiente")
+
+    def test_una_retirada_de_un_periodo_cerrado_sigue_retirada(self):
+        """Irse a mitad de camino es justo lo que ese estado cuenta."""
+        matricula = self.matricular(self.violin, self.terminado, estado="retirada")
+
+        self.assertEqual(matricula.estado_visible, "retirada")
+
+    # -- lo que no se puede romper ------------------------------------------
+
+    def test_la_renovacion_sigue_encontrando_las_matriculas_de_antes(self):
+        """La razón de que "finalizada" no se guarde.
+
+        `matriculas_renovables` busca matrículas ACTIVAS de periodos
+        anteriores. Si al cerrar un periodo sus filas cambiaran de estado, esta
+        consulta devolvería vacío y ningún estudiante antiguo podría renovar.
+        """
+        self.matricular(self.violin, self.terminado)
+
+        periodo_anterior, renovables = matriculas_renovables(self.ana, self.en_curso)
+
+        self.assertEqual(periodo_anterior, self.terminado)
+        self.assertEqual([m.promotoria for m in renovables], [self.violin])
+
+    def test_el_resumen_sigue_contando_lo_finalizado_como_cursado(self):
+        self.matricular(self.violin, self.terminado)
+
+        self.assertEqual(resumen_trayectoria(self.ana)["periodos"], 1)
+
+    # -- en pantalla --------------------------------------------------------
+
+    def test_el_historial_muestra_finalizada_y_no_activa(self):
+        self.matricular(self.violin, self.terminado)
+        self.matricular(self.guitarra, self.en_curso)
+        self.client.force_login(self.ana.usuario)
+
+        respuesta = self.client.get(reverse("mis_matriculas"))
+
+        self.assertContains(respuesta, "estado-finalizada")
+        self.assertContains(respuesta, "Finalizada")
+        # La del periodo en curso conserva su marcador propio.
+        self.assertContains(respuesta, "estado-activa")
 
 
 class FichaUsuarioTests(TestCase):

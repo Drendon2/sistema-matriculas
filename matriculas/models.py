@@ -291,6 +291,18 @@ class Periodo(models.Model):
     def admite_matriculas(self):
         return self.activo and self.matriculas_abiertas
 
+    @property
+    def termino(self):
+        """True si el periodo quedó atrás: ni está en curso ni su fecha llegó.
+
+        Hacen falta las dos condiciones, y cada una tapa un agujero de la otra.
+        Mirar solo `activo` daría por terminado un periodo FUTURO, que no ha
+        empezado siquiera. Mirar solo la fecha daría por terminado el periodo en
+        curso en cuanto el personal se retrase un día en cerrarlo — y ahí las
+        pantallas seguirían, con razón, admitiendo retiros y matrículas.
+        """
+        return not self.activo and self.fecha_fin < date.today()
+
 
 # ---------------------------------------------------------------------------
 # Usuarios: perfil común a TODOS los roles
@@ -703,7 +715,11 @@ class Grupo(models.Model):
         return f"{self.promotoria.nombre} - {self.get_nivel_display()}"
 
     def cupos_disponibles(self, periodo):
-        ocupados = self.matriculas.filter(periodo=periodo, estado="activa").count()
+        # Cuenta también las cancelaciones en trámite: el sitio sigue ocupado
+        # mientras nadie apruebe la salida.
+        ocupados = self.matriculas.filter(
+            periodo=periodo, estado__in=Matricula.ESTADOS_INSCRITO,
+        ).count()
         return self.cupo_maximo - ocupados
 
 
@@ -737,8 +753,34 @@ class Matricula(models.Model):
     ESTADOS = [
         ("pendiente", "Pendiente de confirmación"),
         ("activa", "Activa"),
+        ("cancelacion_solicitada", "Cancelación solicitada"),
         ("retirada", "Retirada"),
     ]
+
+    # Una cancelación pedida y todavía sin resolver NO libera nada, y eso sale
+    # gratis: el índice único de ranura y el trigger de cupo excluyen solo
+    # "retirada", así que este estado sigue ocupando sitio y cupo por sí mismo.
+    # Es lo correcto — mientras nadie la apruebe, el estudiante sigue inscrito.
+    ESTADO_CANCELACION = "cancelacion_solicitada"
+
+    # "Sigue inscrito ahora mismo": la activa y la que está pidiendo salir. Se
+    # usa donde importa quién está EN la clase —los listados del profesor, el
+    # cupo de un grupo— para que una cancelación en trámite no borre al
+    # estudiante de la vista de su propio profesor antes de que se resuelva.
+    ESTADOS_INSCRITO = ("activa", ESTADO_CANCELACION)
+
+    # "Finalizada" NO es un estado guardado, y no está en ESTADOS a propósito:
+    # es lo que se MUESTRA de una matrícula activa cuyo periodo ya quedó atrás.
+    #
+    # No se guarda porque el dato no cambia — la matrícula siguió activa hasta
+    # el final—, lo que cambia es el calendario. Convertirlo en un cuarto valor
+    # real obligaría a migrar las filas y a reescribir la veintena de consultas
+    # que filtran por "activa"; entre ellas `matriculas_renovables`, que busca
+    # precisamente matrículas ACTIVAS de periodos anteriores. Con las filas
+    # migradas no encontraría ninguna y ningún estudiante antiguo podría
+    # renovar.
+    ESTADO_FINALIZADA = "finalizada"
+    ETIQUETAS_ESTADO_VISIBLE = dict(ESTADOS) | {ESTADO_FINALIZADA: "Finalizada"}
 
     estudiante = models.ForeignKey(
         Perfil, on_delete=models.CASCADE, related_name="matriculas",
@@ -752,7 +794,7 @@ class Matricula(models.Model):
     )
     periodo = models.ForeignKey(Periodo, on_delete=models.PROTECT, related_name="matriculas")
     fecha = models.DateTimeField(auto_now_add=True)
-    estado = models.CharField(max_length=10, choices=ESTADOS, default="pendiente")
+    estado = models.CharField(max_length=24, choices=ESTADOS, default="pendiente")
     ranura = models.PositiveSmallIntegerField(
         default=1,
         help_text=(
@@ -957,6 +999,46 @@ class Matricula(models.Model):
             ).exclude(pk=self.pk).count()
             if ocupados >= self.grupo.cupo_maximo:
                 raise ValidationError("El grupo no tiene cupos disponibles para este periodo.")
+
+    @property
+    def cancelacion_pendiente(self):
+        return self.estado == self.ESTADO_CANCELACION
+
+    @property
+    def cancelacion_es_rechazable(self):
+        """¿El director puede NEGAR esta cancelación, o solo aprobarla?
+
+        Depende de la edad del estudiante, y las dos ramas persiguen cosas
+        distintas:
+
+        - **Menor de edad**: sí se puede rechazar. La aprobación es una pausa
+          real, para dar tiempo a hablar con el acudiente antes de que un niño
+          se salga de la promotoría por su cuenta. Rechazar devuelve la
+          matrícula a activa.
+        - **Mayor de edad**: no. Irse es decisión suya y el sistema no se la
+          discute; el paso por el director existe para que quede constancia de
+          en qué promotorías se está yendo la gente, no para retenerla.
+        """
+        return self.estudiante.es_menor
+
+    @property
+    def estado_visible(self):
+        """El estado tal como se lee en pantalla, no como está guardado.
+
+        Solo se transforma la matrícula ACTIVA de un periodo que ya terminó:
+        pasa a "finalizada". Una pendiente sigue pendiente —fue una solicitud
+        que nadie llegó a confirmar, y decir que finalizó sería inventarse un
+        desenlace— y una retirada sigue retirada, porque irse a mitad de
+        camino es justo lo que ese estado cuenta del historial.
+        """
+        if self.estado == "activa" and self.periodo.termino:
+            return self.ESTADO_FINALIZADA
+        return self.estado
+
+    @property
+    def estado_visible_display(self):
+        """Etiqueta legible de `estado_visible` (el equivalente de get_FOO_display)."""
+        return self.ETIQUETAS_ESTADO_VISIBLE[self.estado_visible]
 
     def __str__(self):
         destino = self.grupo or self.promotoria

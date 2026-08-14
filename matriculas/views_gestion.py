@@ -53,6 +53,15 @@ class BorradoProtegidoMixin:
 class GestionInicioView(RolGestionRequiredMixin, TemplateView):
     template_name = "matriculas/gestion_inicio.html"
 
+    def get_context_data(self, **kwargs):
+        contexto = super().get_context_data(**kwargs)
+        # La cifra en la ficha de "Cancelaciones" es lo único que avisa de que
+        # hay gente esperando respuesta: sin ella habría que entrar a mirar.
+        contexto["cancelaciones_pendientes"] = Matricula.objects.filter(
+            estado=Matricula.ESTADO_CANCELACION,
+        ).count()
+        return contexto
+
 
 @requiere_rol("administrador")
 def configuracion_institucion(request):
@@ -257,6 +266,68 @@ def cupos_periodo(request, periodo_id=None):
     })
 
 
+@requiere_rol(*ROLES_GESTION)
+def gestion_cancelaciones(request):
+    """Cancelaciones pedidas por estudiantes y todavía sin resolver.
+
+    Solo director y administrador: el profesor las ve marcadas en su panel,
+    pero no decide. Aprobar retira la matrícula de verdad y libera el cupo;
+    rechazar la devuelve a activa, y eso último solo cabe con menores de edad
+    (ver `Matricula.cancelacion_es_rechazable`).
+    """
+    pendientes = (
+        Matricula.objects.filter(estado=Matricula.ESTADO_CANCELACION)
+        .select_related(
+            "estudiante", "estudiante__datos_estudiante",
+            "estudiante__datos_estudiante__acudiente",
+            "promotoria", "promotoria__area", "periodo", "grupo",
+        )
+        .order_by("periodo__fecha_inicio", "promotoria__nombre")
+    )
+    return render(request, "matriculas/gestion_cancelaciones.html", {
+        "pendientes": list(pendientes),
+    })
+
+
+@requiere_rol(*ROLES_GESTION)
+def gestion_resolver_cancelacion(request, matricula_id, decision):
+    """Aprueba o rechaza una cancelación. `decision` es "aprobar" o "rechazar"."""
+    if request.method != "POST":
+        return redirect("gestion_cancelaciones")
+
+    matricula = get_object_or_404(
+        Matricula, pk=matricula_id, estado=Matricula.ESTADO_CANCELACION,
+    )
+    nombre = matricula.estudiante.nombre_completo
+
+    if decision == "rechazar":
+        # La comprobación va aquí y no solo en la plantilla: ocultar el botón
+        # no impide que alguien envíe el formulario a mano.
+        if not matricula.cancelacion_es_rechazable:
+            messages.error(
+                request,
+                f"{nombre} es mayor de edad, así que su decisión de salir no se rechaza: "
+                "esta cancelación solo se puede aprobar.",
+            )
+            return redirect("gestion_cancelaciones")
+        matricula.estado = "activa"
+        matricula.save(update_fields=["estado"])
+        messages.success(
+            request,
+            f"Cancelación rechazada: {nombre} sigue matriculado en {matricula.promotoria}.",
+        )
+        return redirect("gestion_cancelaciones")
+
+    matricula.estado = "retirada"
+    matricula.grupo = None
+    matricula.save(update_fields=["estado", "grupo"])
+    messages.success(
+        request,
+        f"{nombre} quedó retirado de {matricula.promotoria}. Su cupo vuelve a estar libre.",
+    )
+    return redirect("gestion_cancelaciones")
+
+
 def _con_porcentaje(filas, campo="total"):
     """Agrega 'porcentaje' (ancho de barra 0-100, relativo al valor más alto de la lista)."""
     filas = list(filas)
@@ -350,6 +421,34 @@ def _torta(filas, total_encuestas):
     return {"sectores": sectores, "leyenda": leyenda, "total": total}
 
 
+def _con_permanencia(fila):
+    """Agrega a una fila del árbol sus dos cifras de permanencia.
+
+    Son dos preguntas distintas y se parecen lo bastante como para confundirlas
+    al leerlas rápido, así que cada una lleva su propia base:
+
+    - `pct_desercion` / `pct_continuan` — DENTRO del periodo en curso: de los
+      que llegaron a estar matriculados, cuántos se retiraron y cuántos siguen.
+    - `pct_no_renovo` — ENTRE periodos: de los que cursaron el periodo
+      anterior, cuántos no volvieron a esta misma promotoría.
+
+    La segunda queda en None cuando no hay periodo anterior con datos, para que
+    la plantilla escriba "sin referencia" en vez de un 0% que se leería como
+    "no se fue nadie".
+
+    Ojo con lo que mide la primera: una matrícula "retirada" es hoy tanto la de
+    quien se fue como la de una solicitud que el profesor rechazó, porque las
+    dos acaban en el mismo estado. Mientras eso siga así, la cifra de deserción
+    incluye rechazos.
+    """
+    dentro = fila["total"] + fila["retirados"]
+    fila["pct_desercion"] = round(fila["retirados"] / dentro * 100) if dentro else 0
+    fila["pct_continuan"] = 100 - fila["pct_desercion"] if dentro else 0
+    base = fila["base_renovacion"]
+    fila["pct_no_renovo"] = round(fila["no_renovaron"] / base * 100) if base else None
+    return fila
+
+
 def _stats_choices(encuesta_qs, campo, choices):
     """Conteo de un campo de la encuesta por cada opción declarada.
 
@@ -387,31 +486,80 @@ def estadisticas(request):
     """
     matriculas_activas = Matricula.objects.filter(estado="activa")
 
+    periodo_actual = Periodo.en_curso()
+    periodo_previo = (
+        Periodo.objects.filter(fecha_inicio__lt=periodo_actual.fecha_inicio)
+        .order_by("-fecha_inicio").first()
+        if periodo_actual else None
+    )
+
+    # Quién NO volvió: estudiantes con matrícula activa en el periodo anterior
+    # que no tienen ninguna viva en el actual, contados por promotoría. Se
+    # resuelve aquí arriba, de una vez para todas las promotorías, en lugar de
+    # una consulta por fila del árbol.
+    no_renovaron = {}
+    base_renovacion = {}
+    if periodo_actual and periodo_previo:
+        siguen = set(
+            Matricula.objects.filter(periodo=periodo_actual)
+            .exclude(estado="retirada")
+            .values_list("estudiante_id", "promotoria_id")
+        )
+        for estudiante_id, promotoria_id in Matricula.objects.filter(
+            periodo=periodo_previo, estado="activa",
+        ).values_list("estudiante_id", "promotoria_id"):
+            base_renovacion[promotoria_id] = base_renovacion.get(promotoria_id, 0) + 1
+            if (estudiante_id, promotoria_id) not in siguen:
+                no_renovaron[promotoria_id] = no_renovaron.get(promotoria_id, 0) + 1
+
     # Árbol Departamento → Promotoría: una sola estructura responde "por
     # departamento" y "por promotoría" a la vez, en vez de dos listas planas
     # que repetirían la misma información dos veces.
+    #
+    # Se acota al PERIODO EN CURSO, y eso es nuevo: antes sumaba las activas de
+    # todos los periodos a la vez. Sin acotar, las dos cifras de permanencia no
+    # significarían nada — mezclarían a quien se retiró hace tres años con quien
+    # sigue yendo esta semana. El desglose histórico vive en "Estudiantes por
+    # periodo", justo debajo.
     departamentos = {}
     orden_departamentos = []
     filas_promotoria = (
-        matriculas_activas
+        Matricula.objects.filter(periodo=periodo_actual)
+        .exclude(estado="pendiente")
         .values("promotoria_id", "promotoria__nombre", "promotoria__area_id", "promotoria__area__nombre")
-        .annotate(total=Count("id"))
-        .order_by("promotoria__area__nombre", "-total")
-    )
+        .annotate(
+            # "Continúan" incluye las cancelaciones en trámite: mientras nadie
+            # las apruebe, esa gente sigue inscrita.
+            continuan=Count("id", filter=Q(estado__in=Matricula.ESTADOS_INSCRITO)),
+            retirados=Count("id", filter=Q(estado="retirada")),
+        )
+        .order_by("promotoria__area__nombre", "-continuan")
+    ) if periodo_actual else []
+
     for fila in filas_promotoria:
         area_id = fila["promotoria__area_id"]
+        promotoria_id = fila["promotoria_id"]
         if area_id not in departamentos:
             departamentos[area_id] = {
                 "nombre": fila["promotoria__area__nombre"],
                 "tag_class": f"tag-{area_id % 8}",
-                "total": 0,
+                "total": 0, "retirados": 0,
+                "base_renovacion": 0, "no_renovaron": 0,
                 "promotorias": [],
             }
             orden_departamentos.append(area_id)
-        departamentos[area_id]["total"] += fila["total"]
-        departamentos[area_id]["promotorias"].append({
+
+        departamento = departamentos[area_id]
+        departamento["total"] += fila["continuan"]
+        departamento["retirados"] += fila["retirados"]
+        departamento["base_renovacion"] += base_renovacion.get(promotoria_id, 0)
+        departamento["no_renovaron"] += no_renovaron.get(promotoria_id, 0)
+        departamento["promotorias"].append({
             "etiqueta": fila["promotoria__nombre"],
-            "total": fila["total"],
+            "total": fila["continuan"],
+            "retirados": fila["retirados"],
+            "base_renovacion": base_renovacion.get(promotoria_id, 0),
+            "no_renovaron": no_renovaron.get(promotoria_id, 0),
         })
 
     arbol_departamentos = [departamentos[area_id] for area_id in orden_departamentos]
@@ -419,6 +567,9 @@ def estadisticas(request):
     arbol_departamentos = _con_porcentaje(arbol_departamentos)
     for departamento in arbol_departamentos:
         departamento["promotorias"] = _con_porcentaje(departamento["promotorias"])
+        _con_permanencia(departamento)
+        for promotoria in departamento["promotorias"]:
+            _con_permanencia(promotoria)
 
     nivel_labels = dict(Grupo.NIVELES)
     grupos_por_curso = _con_porcentaje([
@@ -451,6 +602,8 @@ def estadisticas(request):
 
     return render(request, "matriculas/gestion_estadisticas.html", {
         "arbol_departamentos": arbol_departamentos,
+        "periodo_actual": periodo_actual,
+        "periodo_previo": periodo_previo,
         "grupos_por_curso": grupos_por_curso,
         "estudiantes_por_periodo": estudiantes_por_periodo,
         "total_estudiantes_activos": matriculas_activas.values("estudiante").distinct().count(),
@@ -769,7 +922,9 @@ def grupo_estudiantes(request, grupo_id):
     grupo = get_object_or_404(
         Grupo.objects.select_related("promotoria", "promotoria__area"), pk=grupo_id
     )
-    matriculas = Matricula.objects.filter(grupo=grupo, estado="activa").select_related(
+    matriculas = Matricula.objects.filter(
+        grupo=grupo, estado__in=Matricula.ESTADOS_INSCRITO,
+    ).select_related(
         "estudiante", "estudiante__datos_estudiante", "estudiante__datos_estudiante__acudiente"
     )
     migas = [

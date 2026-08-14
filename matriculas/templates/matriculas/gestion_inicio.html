@@ -8,6 +8,10 @@
   <a class="tarjeta-enlace" href="{% url 'area_lista' %}">Departamentos</a>
   <a class="tarjeta-enlace" href="{% url 'periodo_lista' %}">Periodos</a>
   <a class="tarjeta-enlace" href="{% url 'gestion_matriculas' %}">Iniciar / finalizar matrículas</a>
+  <a class="tarjeta-enlace" href="{% url 'gestion_cancelaciones' %}">
+    {% if cancelaciones_pendientes %}<span class="num">{{ cancelaciones_pendientes }}</span>{% endif %}
+    Cancelaciones
+  </a>
   <a class="tarjeta-enlace" href="{% url 'promotoria_lista' %}">Promotorías</a>
   <a class="tarjeta-enlace" href="{% url 'gestion_cupos' %}">Cupos por promotoría</a>
   <a class="tarjeta-enlace" href="{% url 'grupo_lista' %}">Grupos</a>

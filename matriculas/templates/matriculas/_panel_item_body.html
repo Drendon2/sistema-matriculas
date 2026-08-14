@@ -55,6 +55,7 @@
         {% if e.perfil|ficha_visible_para:user.perfil %}
           <a href="{% url 'detalle_usuario' e.perfil.id %}">{{ e.perfil.nombre_completo }}</a>
         {% else %}{{ e.perfil.nombre_completo }}{% endif %}
+        {% if e.cancelacion %}<span class="estado estado-cancelacion_solicitada">Pidió cancelar</span>{% endif %}
       </td>
       <td>
         {% if e.renovacion %}
@@ -126,6 +127,7 @@
         {% if e.perfil|ficha_visible_para:user.perfil %}
           <a href="{% url 'detalle_usuario' e.perfil.id %}">{{ e.perfil.nombre_completo }}</a>
         {% else %}{{ e.perfil.nombre_completo }}{% endif %}
+        {% if e.cancelacion %}<span class="estado estado-cancelacion_solicitada">Pidió cancelar</span>{% endif %}
       </td>
         <td>{{ e.perfil.edad }}</td>
         <td>{{ e.perfil.telefono }}</td>
@@ -171,6 +173,7 @@
         {% if e.perfil|ficha_visible_para:user.perfil %}
           <a href="{% url 'detalle_usuario' e.perfil.id %}">{{ e.perfil.nombre_completo }}</a>
         {% else %}{{ e.perfil.nombre_completo }}{% endif %}
+        {% if e.cancelacion %}<span class="estado estado-cancelacion_solicitada">Pidió cancelar</span>{% endif %}
       </td>
       <td>{{ e.perfil.edad }}</td>
       <td>{{ e.perfil.telefono }}</td>

@@ -1,0 +1,83 @@
+{% extends "matriculas/base.html" %}
+{% load matriculas_extras %}
+
+{% block title %}Cancelaciones{% endblock %}
+
+{% block content %}
+<a href="{% url 'gestion_inicio' %}" class="volver">&larr; Gestión</a>
+<h2>Cancelaciones por resolver</h2>
+
+<p class="campo-info" style="margin-top:-0.8rem;">
+  Mientras una cancelación esté aquí, el estudiante <strong>sigue matriculado</strong> y su
+  cupo sigue ocupado. Aprobarla lo retira y libera el cupo.
+</p>
+
+{% if not pendientes %}
+  <p class="vacio">No hay cancelaciones pendientes.</p>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th>Estudiante</th>
+      <th>Promotoría</th>
+      <th>Periodo</th>
+      <th>Acudiente</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for m in pendientes %}
+    <tr>
+      <td>
+        {% if m.estudiante|ficha_visible_para:user.perfil %}
+          <a href="{% url 'detalle_usuario' m.estudiante.id %}">{{ m.estudiante.nombre_completo }}</a>
+        {% else %}{{ m.estudiante.nombre_completo }}{% endif %}
+        {% if m.cancelacion_es_rechazable %}
+          <span class="estado estado-pendiente" style="margin-left:0.4rem;">Menor de edad</span>
+        {% endif %}
+      </td>
+      <td>
+        <span class="tag-dot {{ m.promotoria.area|tag_color }}"></span>{{ m.promotoria.nombre }}
+        <span class="historial-area">{{ m.promotoria.area }}</span>
+      </td>
+      <td>{{ m.periodo.nombre }}</td>
+      <td>
+        {% if m.estudiante.datos_estudiante.acudiente %}
+          {{ m.estudiante.datos_estudiante.acudiente.nombre }}
+          ({{ m.estudiante.datos_estudiante.acudiente.telefono }})
+        {% else %}
+          <span class="vacio">—</span>
+        {% endif %}
+      </td>
+      <td style="text-align:right;white-space:nowrap;">
+        <span class="accion-fila">
+          <form action="{% url 'gestion_resolver_cancelacion' m.id 'aprobar' %}" method="post" style="display:inline;">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-retirar btn-sm">Aprobar retiro</button>
+          </form>
+          {% comment %}
+          Rechazar solo cabe con menores: la pausa existe para hablar con el
+          acudiente antes de que un niño se salga por su cuenta. A un mayor de
+          edad no se le discute la decisión, así que el botón ni aparece — y la
+          vista lo vuelve a comprobar, porque ocultarlo no impide enviar el
+          formulario a mano.
+          {% endcomment %}
+          {% if m.cancelacion_es_rechazable %}
+          {% comment %}
+          Secundario y no primario: en verde de acción, "Rechazar" empujaría al
+          director a negar la salida de un niño, y esa decisión no la debe
+          inclinar el sistema. Ninguno de los dos botones es el recomendado.
+          {% endcomment %}
+          <form action="{% url 'gestion_resolver_cancelacion' m.id 'rechazar' %}" method="post" style="display:inline;">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-secundario btn-sm">Rechazar</button>
+          </form>
+          {% endif %}
+        </span>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

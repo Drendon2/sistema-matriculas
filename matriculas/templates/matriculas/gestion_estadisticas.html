@@ -27,16 +27,30 @@
   </div>
 </div>
 
-<h3 style="margin-top: 0.5rem;">Estudiantes por departamento y promotoría</h3>
-{% if not arbol_departamentos %}
-  <p class="vacio">Todavía no hay matrículas activas.</p>
+<h3 style="margin-top: 0.5rem;">
+  Estudiantes por departamento y promotoría
+  {% if periodo_actual %}<span class="h4-nota">— {{ periodo_actual.nombre }}</span>{% endif %}
+</h3>
+{% if not periodo_actual %}
+  <p class="vacio">No hay un periodo en curso, así que no hay nada que medir.</p>
+{% elif not arbol_departamentos %}
+  <p class="vacio">Todavía no hay matrículas en {{ periodo_actual.nombre }}.</p>
 {% else %}
+  <p class="campo-info" style="margin: -0.4rem 0 1rem;">
+    <strong>Sigue</strong> es quién continúa matriculado hoy y <strong>deja</strong> quién se
+    retiró, ambos dentro de {{ periodo_actual.nombre }}.
+    {% if periodo_previo %}
+      <strong>No volvió</strong> es otra cosa: de quienes cursaron {{ periodo_previo.nombre }},
+      qué parte no regresó a esa misma promotoría.
+    {% endif %}
+  </p>
   {% for d in arbol_departamentos %}
   <div class="dash-departamento">
     <div class="stat-bar-fila">
       <span class="stat-bar-etiqueta"><span class="tag-dot {{ d.tag_class }}"></span>{{ d.nombre }}</span>
       <div class="stat-bar-pista"><div class="stat-bar-relleno {{ d.tag_class }}" style="width: {{ d.porcentaje }}%;"></div></div>
       <span class="stat-bar-num">{{ d.total }}</span>
+      {% include "matriculas/_permanencia.html" with fila=d hay_previo=periodo_previo %}
     </div>
     <div class="dash-promotorias">
       {% for p in d.promotorias %}
@@ -44,6 +58,7 @@
         <span class="stat-bar-etiqueta">{{ p.etiqueta }}</span>
         <div class="stat-bar-pista"><div class="stat-bar-relleno" style="width: {{ p.porcentaje }}%;"></div></div>
         <span class="stat-bar-num">{{ p.total }}</span>
+        {% include "matriculas/_permanencia.html" with fila=p hay_previo=periodo_previo %}
       </div>
       {% endfor %}
     </div>

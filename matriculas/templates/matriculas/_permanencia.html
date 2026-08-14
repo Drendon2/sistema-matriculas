@@ -1,0 +1,32 @@
+{% comment %}
+Las cifras de permanencia que acompañan a una barra del árbol de departamentos.
+
+Contexto:
+  fila ........ un nodo del árbol, ya pasado por `_con_permanencia`
+  hay_previo .. el periodo anterior, o vacío si no hay con qué comparar
+
+Van como texto y no como una segunda barra a propósito: la barra de la fila ya
+está diciendo una magnitud (cuánta gente), y meterle al lado otra barra de
+composición obligaría a leer dos escalas distintas en el mismo renglón.
+
+"No volvió" solo aparece cuando hay un periodo anterior con el que comparar. Si
+no lo hay, se escribe que no hay referencia en vez de un 0%, que se leería como
+"no se fue nadie" — lo contrario de lo que significa.
+{% endcomment %}
+<span class="permanencia">
+  <span class="permanencia-dato" title="Siguen matriculados en el periodo">
+    {{ fila.pct_continuan }}% sigue
+  </span>
+  <span class="permanencia-dato permanencia-fuga" title="Se retiraron durante el periodo">
+    {{ fila.pct_desercion }}% deja
+  </span>
+  {% if hay_previo %}
+  <span class="permanencia-dato permanencia-fuga" title="No regresaron del periodo anterior">
+    {% if fila.pct_no_renovo is None %}
+      <span class="vacio" style="padding:0;font-size:inherit;">sin referencia</span>
+    {% else %}
+      {{ fila.pct_no_renovo }}% no volvió
+    {% endif %}
+  </span>
+  {% endif %}
+</span>

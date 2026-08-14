@@ -34,6 +34,11 @@ urlpatterns = [
     path("gestion/estadisticas/", views_gestion.estadisticas, name="gestion_estadisticas"),
     path("gestion/institucion/", views_gestion.configuracion_institucion, name="gestion_configuracion"),
     path("gestion/matriculas/", views_gestion.ventana_matriculas, name="gestion_matriculas"),
+    path("gestion/cancelaciones/", views_gestion.gestion_cancelaciones, name="gestion_cancelaciones"),
+    path(
+        "gestion/cancelaciones/<int:matricula_id>/<str:decision>/",
+        views_gestion.gestion_resolver_cancelacion, name="gestion_resolver_cancelacion",
+    ),
     path("gestion/cupos/", views_gestion.cupos_periodo, name="gestion_cupos"),
     path("gestion/cupos/<int:periodo_id>/", views_gestion.cupos_periodo, name="gestion_cupos_periodo"),
 

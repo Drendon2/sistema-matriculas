@@ -51,9 +51,11 @@
   {% endif %}
 </table>
 {% else %}
-  {# Ver la matriz de visibilidad en models.py: la edad, el teléfono y el
-     acudiente de un estudiante son del administrador, del director y del
-     profesor de SUS promotorías. Poder abrir la ficha no los desbloquea. #}
+  {% comment %}
+  Ver la matriz de visibilidad en models.py: la edad, el teléfono y el
+  acudiente de un estudiante son del administrador, del director y del profesor
+  de SUS promotorías. Poder abrir la ficha no los desbloquea.
+  {% endcomment %}
   <p class="vacio">
     Edad, teléfono y acudiente solo los ve el personal a cargo de este estudiante.
   </p>

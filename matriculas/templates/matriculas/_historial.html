@@ -63,15 +63,24 @@ Contexto:
         {% if modo == "estudiante" %}
         <td class="num">{{ m.fecha|date:"d/m/Y" }}</td>
         {% endif %}
-        <td><span class="estado estado-{{ m.estado }}">{{ m.get_estado_display }}</span></td>
+        {% comment %}
+        `estado_visible` y no `estado`: una activa de un periodo cerrado se lee
+        como "Finalizada". No es un valor guardado, se deduce del calendario
+        (ver Matricula.estado_visible).
+        {% endcomment %}
+        <td>
+          <span class="estado estado-{{ m.estado_visible }}">{{ m.estado_visible_display }}</span>
+        </td>
         {% if modo == "estudiante" %}
         <td>
           {% if m.periodo_id != periodo_actual_id %}
             <span class="periodo-terminado">Periodo terminado</span>
+          {% elif m.cancelacion_pendiente %}
+            <span class="periodo-terminado">En trámite</span>
           {% elif m.estado == "activa" or m.estado == "pendiente" %}
           <form action="{% url 'retirar_matricula' m.id %}" method="post">
             {% csrf_token %}
-            <button type="submit" class="btn btn-retirar btn-sm">Retirarme</button>
+            <button type="submit" class="btn btn-retirar btn-sm">Cancelar matrícula</button>
           </form>
           {% endif %}
         </td>

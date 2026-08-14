@@ -219,7 +219,8 @@
 
   /* Estado de matrícula: un marcador de cartelera, no una píldora de color plano.
      Activa = pin sólido (relleno + puntito), pendiente = contorno punteado (sin
-     pinear todavía), retirada = tachado. Forma primero, color después. */
+     pinear todavía), retirada = tachado, finalizada = relleno neutro SIN puntito
+     (estuvo pineada, ya se descolgó). Forma primero, color después. */
   .estado {
     display: inline-flex;
     align-items: center;
@@ -246,6 +247,26 @@
     background: var(--danger-bg); color: var(--danger);
     border: 1.5px solid var(--danger);
     text-decoration: line-through;
+  }
+  /* Cancelación solicitada: el estudiante pidió salirse y nadie lo ha resuelto.
+     Compone las dos formas que ya existen en vez de inventar una tercera —
+     punteado como "pendiente", porque está sin decidir, y en rojo como
+     "retirada", porque de lo que se trata es de una salida. Sin tachar: todavía
+     no se ha ido, y ese es justo el punto. */
+  .estado-cancelacion_solicitada {
+    background: transparent; color: var(--danger);
+    border: 1.5px dashed var(--danger);
+  }
+
+  /* Finalizada: estuvo pineada y ya se descolgó. Se distingue de las otras tres
+     por forma antes que por color — borde SÓLIDO (pendiente lo tiene punteado),
+     sin puntito de cabeza de pin (activa sí lo lleva) y sin tachar (retirada sí).
+     El borde va en tinta tenue y no en borde-fuerte: ese gris queda en 1.6:1
+     contra el blanco de la tabla, y con el relleno también casi invisible (1.15:1)
+     el marcador se leería como texto suelto en vez de como marcador. */
+  .estado-finalizada {
+    background: var(--surface-alt); color: var(--ink-soft);
+    border: 1.5px solid var(--ink-faint);
   }
 
   .cupos-agotados { color: var(--danger); font-weight: 700; }
@@ -278,6 +299,17 @@
   .stat-bar-pista { flex: 1 1 auto; height: 10px; background: var(--surface-alt); border-radius: 5px; overflow: hidden; }
   .stat-bar-relleno { height: 100%; border-radius: 5px; background: var(--accent); }
   .stat-bar-num { flex: 0 0 auto; font-family: var(--font-mono); font-weight: 700; font-size: 0.82rem; color: var(--ink); min-width: 26px; text-align: right; }
+
+  /* Cifras de permanencia al final de una barra del árbol. En monoespaciada y
+     con ancho fijo por dato para que las columnas se lean en vertical entre
+     filas; en tinta tenue porque son lectura secundaria — la barra manda. */
+  .permanencia {
+    flex: 0 0 auto; display: flex; gap: 0.7rem; margin-left: 0.9rem;
+    font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-faint);
+  }
+  .permanencia-dato { white-space: nowrap; }
+  /* Lo que se va lleva el rojo del sistema, el mismo de "retirada". */
+  .permanencia-fuga { color: var(--danger); }
 
   .dash-departamento { margin-bottom: 1.4rem; }
   .dash-departamento > .stat-bar-fila .stat-bar-etiqueta { font-weight: 700; }

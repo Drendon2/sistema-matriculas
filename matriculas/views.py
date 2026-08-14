@@ -534,11 +534,41 @@ def retirar_matricula(request, matricula_id):
         )
         return redirect("mis_matriculas")
 
-    if matricula.estado in ("activa", "pendiente"):
+    # Una matrícula que el profesor todavía no confirmó no es una deserción:
+    # es una solicitud que el estudiante retira antes de que le respondan, y
+    # obligarlo a esperar el visto bueno de un director para eso solo llenaría
+    # la cola de la dirección. Se cancela en el acto.
+    if matricula.estado == "pendiente":
         matricula.estado = "retirada"
         matricula.grupo = None
         matricula.save(update_fields=["estado", "grupo"])
-        messages.success(request, f"Te retiraste de {matricula.promotoria}.")
+        messages.success(
+            request,
+            f"Retiraste tu solicitud a {matricula.promotoria}. Como todavía no estaba "
+            "confirmada, no hace falta que nadie la apruebe.",
+        )
+        return redirect("mis_matriculas")
+
+    # Desde una matrícula ya activa, salirse pasa a ser una SOLICITUD: la
+    # decisión es de un director o administrador (ver `gestion_cancelaciones`).
+    # Hasta que la resuelvan, la matrícula sigue ocupando cupo y ranura, porque
+    # el estudiante sigue inscrito.
+    if matricula.estado == "activa":
+        matricula.estado = Matricula.ESTADO_CANCELACION
+        matricula.save(update_fields=["estado"])
+        if matricula.cancelacion_es_rechazable:
+            messages.success(
+                request,
+                f"Tu solicitud para cancelar {matricula.promotoria} quedó registrada. "
+                "Como eres menor de edad, la dirección hablará con tu acudiente antes "
+                "de resolverla; mientras tanto sigues inscrito.",
+            )
+        else:
+            messages.success(
+                request,
+                f"Tu solicitud para cancelar {matricula.promotoria} quedó registrada. "
+                "Sigues inscrito hasta que la dirección la tramite.",
+            )
 
     return redirect("mis_matriculas")
 
@@ -600,6 +630,9 @@ def _ficha_estudiante(matricula):
         "perfil": est,
         "acudiente": datos_est.acudiente if datos_est else None,
         "renovacion": renovacion,
+        # El profesor se entera de que el estudiante está de salida, pero la
+        # decisión no es suya: la marca es informativa y no trae botones.
+        "cancelacion": matricula.cancelacion_pendiente,
     }
 
 
@@ -625,7 +658,9 @@ def panel(request):
     for promotoria in promotorias_qs:
         grupos_info = []
         for grupo in promotoria.grupos.all():
-            matriculas = grupo.matriculas.filter(estado="activa").select_related(
+            matriculas = grupo.matriculas.filter(
+                estado__in=Matricula.ESTADOS_INSCRITO
+            ).select_related(
                 "estudiante", "estudiante__datos_estudiante", "estudiante__datos_estudiante__acudiente"
             )
             grupos_info.append({
@@ -634,7 +669,7 @@ def panel(request):
             })
 
         sin_grupo = Matricula.objects.filter(
-            promotoria=promotoria, estado="activa", grupo__isnull=True
+            promotoria=promotoria, estado__in=Matricula.ESTADOS_INSCRITO, grupo__isnull=True
         ).select_related("estudiante", "estudiante__datos_estudiante", "estudiante__datos_estudiante__acudiente")
 
         pendientes = Matricula.objects.filter(
