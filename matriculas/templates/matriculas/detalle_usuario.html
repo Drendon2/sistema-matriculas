@@ -95,9 +95,15 @@
 </p>
 {% endif %}
 
-{# Sale del vínculo, no del rol: un director que además dicta tiene las suyas.
-   Al profesor se le enseña la sección aunque esté vacía, porque ahí el hueco es
-   el dato — a nadie más le dice nada. #}
+{% comment %}
+Sale del vínculo, no del rol: un director que además dicta tiene las suyas.
+Al profesor se le enseña la sección aunque esté vacía, porque ahí el hueco es
+el dato — a nadie más le dice nada.
+
+Va en la forma larga y no en la corta (llave-almohadilla): esa es de UNA línea,
+y escrita en varias Django deja de verla como comentario y la imprime tal cual
+en la página, que es lo que llevaba haciendo aquí.
+{% endcomment %}
 {% if objetivo.rol == "profesor" or promotorias %}
 <h3>Promotorías a cargo</h3>
 {% if not promotorias %}

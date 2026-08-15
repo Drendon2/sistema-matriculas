@@ -1257,6 +1257,18 @@ class FichaUsuarioTests(TestCase):
         self.client.force_login(quien.usuario)
         return self.client.get(reverse("detalle_usuario", args=[objetivo.id]))
 
+    # -- la plantilla no se imprime a sí misma ------------------------------
+
+    def test_la_ficha_no_imprime_comentarios_de_plantilla(self):
+        """La forma corta del comentario (llave-almohadilla) es de UNA línea.
+        Escrita en varias, Django deja de verla como comentario y la manda tal
+        cual a la página: una nota interna estuvo saliendo a la vista en la
+        ficha de todo profesor."""
+        respuesta = self.abrir(self.director, self.profe)
+
+        self.assertNotContains(respuesta, "Sale del vínculo")
+        self.assertNotContains(respuesta, "{#")
+
     # -- quién puede abrir la ficha (jerarquía) -----------------------------
 
     def test_el_administrador_abre_la_ficha_de_cualquiera(self):
