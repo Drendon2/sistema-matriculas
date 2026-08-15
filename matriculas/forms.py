@@ -5,9 +5,29 @@ from django.contrib.auth.models import User
 
 from .models import (
     RANURA_MAXIMA_ABSOLUTA,
-    ConfiguracionInstitucion, DatosEstudiante, EncuestaDemografica,
-    EncuestaSatisfaccion, Grupo, Perfil, Promotoria, limite_promotorias,
+    ConfiguracionInstitucion, DatosEstudiante, DocumentoRequerido,
+    EncuestaDemografica, EncuestaSatisfaccion, Grupo, Perfil, Promotoria,
+    limite_promotorias,
 )
+
+
+class DocumentoRequeridoForm(forms.ModelForm):
+    """Alta de un papel que la institución va a pedir.
+
+    `activo` no está: un documento se crea pidiéndose. Dejar de pedirlo es una
+    acción aparte en la lista, y no una casilla que se pueda desmarcar sin
+    darse cuenta mientras se escribe el nombre.
+    """
+
+    class Meta:
+        model = DocumentoRequerido
+        fields = ["nombre", "descripcion", "obligatorio", "orden"]
+        widgets = {
+            "nombre": forms.TextInput(attrs={"placeholder": "Certificado de EPS"}),
+            "descripcion": forms.TextInput(
+                attrs={"placeholder": "Vigencia no mayor a 30 días (opcional)"}),
+            "orden": forms.NumberInput(attrs={"min": 0, "step": 1, "style": "width:5rem;"}),
+        }
 
 
 class ConfiguracionInstitucionForm(forms.ModelForm):

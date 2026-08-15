@@ -657,6 +657,97 @@ class DatosEstudiante(models.Model):
     def __str__(self):
         return self.perfil.nombre_completo
 
+    def documentos_faltantes(self, exigidos=None):
+        """Los papeles pedidos que este estudiante todavía no ha subido.
+
+        `exigidos` evita repetir la consulta cuando quien llama va a preguntar
+        por una lista entera de estudiantes — el listado del panel lo hace por
+        cada fila y sin esto sería una consulta por estudiante.
+        """
+        if exigidos is None:
+            exigidos = DocumentoRequerido.objects.filter(activo=True)
+        entregados = {d.requerido_id for d in self.documentos.all() if d.archivo}
+        return [d for d in exigidos if d.id not in entregados]
+
+
+class DocumentoRequerido(models.Model):
+    """Un papel que ESTA institución exige para dar por válida una matrícula.
+
+    Qué papeles hacen falta cambia de una entidad a otra —una pide certificado
+    de EPS, otra el recibo de servicios, otra nada—, así que la lista es un
+    registro editable desde Gestión y no una constante del código.
+
+    Se DESACTIVA en vez de borrarse cuando deja de pedirse: los archivos que ya
+    subieron los estudiantes cuelgan de aquí, y borrar el requisito se los
+    llevaría por delante junto con la prueba de que en su momento cumplieron.
+    """
+
+    nombre = models.CharField(
+        max_length=60,
+        help_text="Cómo lo verá el estudiante. Por ejemplo: «Certificado de EPS».",
+    )
+    descripcion = models.CharField(
+        max_length=200, blank=True, verbose_name="descripción",
+        help_text="Aclaración opcional: vigencia, formato, dónde conseguirlo.",
+    )
+    obligatorio = models.BooleanField(
+        default=True,
+        help_text=(
+            "Si no es obligatorio se le pide igual, pero su ausencia no marca la "
+            "matrícula como incompleta."
+        ),
+    )
+    activo = models.BooleanField(
+        default=True,
+        help_text="Desactívalo para dejar de pedirlo sin borrar lo ya entregado.",
+    )
+    orden = models.PositiveSmallIntegerField(
+        default=0, help_text="Menor primero. Con el mismo número manda el nombre.",
+    )
+
+    class Meta:
+        verbose_name = "Documento requerido"
+        verbose_name_plural = "Documentos requeridos"
+        ordering = ["orden", "nombre"]
+        constraints = [
+            models.UniqueConstraint(fields=["nombre"], name="un_documento_por_nombre"),
+        ]
+
+    def __str__(self):
+        return self.nombre
+
+
+class DocumentoEstudiante(models.Model):
+    """El archivo que un estudiante subió para uno de los papeles pedidos.
+
+    Vive aparte de `DatosEstudiante.copia_documento` a propósito: aquella es la
+    cédula/registro civil, que el sistema pide siempre y a la que el resto del
+    código ya se refiere por su nombre. Estos son los papeles VARIABLES de cada
+    institución, y meterlos en la misma columna obligaría a migrar el esquema
+    cada vez que una entidad pida un papel más.
+    """
+
+    datos = models.ForeignKey(
+        DatosEstudiante, on_delete=models.CASCADE, related_name="documentos",
+    )
+    requerido = models.ForeignKey(
+        DocumentoRequerido, on_delete=models.CASCADE, related_name="entregas",
+    )
+    archivo = models.FileField(upload_to="documentos/")
+    subido = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Documento de estudiante"
+        verbose_name_plural = "Documentos de estudiantes"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["datos", "requerido"], name="un_archivo_por_documento_y_estudiante",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.datos.perfil.nombre_completo} — {self.requerido.nombre}"
+
 
 # ---------------------------------------------------------------------------
 # Promotorías, grupos y matrículas

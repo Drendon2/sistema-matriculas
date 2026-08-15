@@ -80,6 +80,78 @@
   </form>
 </div>
 
+{% comment %}
+Los documentos van FUERA del formulario de arriba y con los suyos propios:
+agregar un papel y desactivarlo son acciones sueltas que se resuelven solas, no
+un campo que se guarde junto con el color de la marca. Anidar formularios,
+además, es HTML inválido.
+{% endcomment %}
+<div class="card" style="margin-top:1.4rem;">
+  <h3 style="margin-top:0;">Documentos para matricularse</h3>
+  <p class="config-ayuda" style="margin-top:-0.4rem;">
+    Los papeles que esta institución exige. El estudiante los sube desde <strong>Mi perfil</strong>,
+    y a quien le falte alguno obligatorio le sale una etiqueta en el panel del profesor y en su
+    ficha. La copia del documento de identidad se pide siempre y no se configura aquí.
+  </p>
+
+  {% if documentos %}
+  <table>
+    <thead>
+      <tr><th>Documento</th><th>Obligatorio</th><th>Entregados</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for d in documentos %}
+      <tr>
+        <td>
+          {{ d.nombre }}
+          {% if not d.activo %}<span class="estado estado-pendiente">Ya no se pide</span>{% endif %}
+          {% if d.descripcion %}<span class="campo-info" style="margin:0;display:block;">{{ d.descripcion }}</span>{% endif %}
+        </td>
+        <td>{% if d.obligatorio %}Sí{% else %}<span class="vacio">Opcional</span>{% endif %}</td>
+        <td>{{ d.entregados }}</td>
+        <td style="text-align:right;white-space:nowrap;">
+          <form action="{% url 'documento_requerido_alternar' d.id %}" method="post" style="display:inline;">
+            {% csrf_token %}
+            {% comment %}
+            "Dejar de pedir" y no "Eliminar": los archivos que ya subieron los
+            estudiantes cuelgan de esta fila, y borrarla se llevaría la prueba
+            de que en su momento cumplieron.
+            {% endcomment %}
+            <button type="submit" class="btn btn-secundario btn-sm">
+              {% if d.activo %}Dejar de pedir{% else %}Volver a pedir{% endif %}
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="vacio">No se pide ningún documento además de la copia del documento de identidad.</p>
+  {% endif %}
+
+  <form action="{% url 'documento_requerido_nuevo' %}" method="post" class="doc-alta">
+    {% csrf_token %}
+    <div class="doc-alta-campo doc-alta-ancho">
+      <label class="config-etiqueta" for="{{ form_documento.nombre.id_for_label }}">Nombre</label>
+      {{ form_documento.nombre }}
+    </div>
+    <div class="doc-alta-campo doc-alta-ancho">
+      <label class="config-etiqueta" for="{{ form_documento.descripcion.id_for_label }}">Aclaración</label>
+      {{ form_documento.descripcion }}
+    </div>
+    <div class="doc-alta-campo">
+      <label class="config-etiqueta" for="{{ form_documento.orden.id_for_label }}">Orden</label>
+      {{ form_documento.orden }}
+    </div>
+    <label class="config-interruptor doc-alta-campo">
+      {{ form_documento.obligatorio }}
+      <span class="config-etiqueta">Obligatorio</span>
+    </label>
+    <button type="submit" class="btn btn-sm">+ Agregar documento</button>
+  </form>
+</div>
+
 <script>
   // El input de archivo va oculto y la etiqueta hace de control (ver
   // .config-logo-file en base.html), así que el navegador ya no escribe por su

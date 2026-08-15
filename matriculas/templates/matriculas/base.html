@@ -248,6 +248,15 @@
     background: transparent; color: var(--ink-soft);
     border: 1.5px dashed var(--border-strong);
   }
+  /* Faltan papeles. Reusa la FORMA de "pendiente" —contorno punteado, sin
+     relleno— porque dice lo mismo: algo está a medias. No lleva el rojo de
+     "retirada": a nadie se le ha quitado nada, falta una gestión. La cifra va
+     en el texto y el detalle en el title, así que no depende del color. */
+  .estado-papeles {
+    background: transparent; color: var(--ink-soft);
+    border: 1.5px dashed var(--border-strong);
+    cursor: help;
+  }
   .estado-retirada {
     background: var(--danger-bg); color: var(--danger);
     border: 1.5px solid var(--danger);
@@ -620,6 +629,37 @@
   }
   .asis-leyenda li { display: flex; align-items: center; gap: 0.35rem; }
   .asis-leyenda strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  /* Interruptor de configuración: la casilla y su texto son un solo blanco de
+     clic, que es lo que se espera de un ajuste de sí/no. */
+  .config-interruptor {
+    display: flex; align-items: center; gap: 0.5rem; cursor: pointer;
+  }
+  .config-interruptor input { width: auto; margin: 0; }
+  .config-interruptor .config-etiqueta { margin: 0; cursor: pointer; }
+
+  /* Alta de un documento: una sola fila que se estira. Los dos campos de texto
+     se reparten el sobrante y el orden se queda en su ancho de dos dígitos. */
+  .doc-alta {
+    display: flex; flex-wrap: wrap; gap: 0.6rem 0.8rem; align-items: flex-end;
+    margin-top: 1.1rem; padding-top: 1.1rem; border-top: 1px solid var(--border);
+  }
+  /* Una ranura por papel pedido, en Mi perfil. */
+  .papel-fila {
+    display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap;
+    padding: 0.7rem 0; border-top: 1px solid var(--border);
+  }
+  .papel-datos { display: flex; flex-direction: column; gap: 0.15rem; flex: 1 1 14rem; }
+  /* Sin esto la etiqueta se estira a todo el ancho de la columna: un hijo de
+     flex en columna se alarga por defecto, y un chip de estado ancho deja de
+     leerse como chip. */
+  .papel-datos > .estado { align-self: flex-start; }
+  .papel-nombre { font-weight: 700; color: var(--ink); }
+  .papel-fila input[type="file"] { width: auto; flex: 0 1 auto; }
+
+  .doc-alta-campo { display: flex; flex-direction: column; gap: 0.25rem; }
+  .doc-alta-ancho { flex: 1 1 12rem; }
+  .doc-alta input[type="text"] { width: 100%; }
 
   .accion-fila { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
 

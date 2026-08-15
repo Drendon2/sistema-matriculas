@@ -56,6 +56,7 @@
           <a href="{% url 'detalle_usuario' e.perfil.id %}">{{ e.perfil.nombre_completo }}</a>
         {% else %}{{ e.perfil.nombre_completo }}{% endif %}
         {% if e.cancelacion %}<span class="estado estado-cancelacion_solicitada">Pidió cancelar</span>{% endif %}
+        {% if e.papeles_pendientes %}<span class="estado estado-papeles" title="Le faltan: {% for d in e.papeles_pendientes %}{{ d.nombre }}{% if not forloop.last %}, {% endif %}{% endfor %}">Faltan {{ e.papeles_pendientes|length }} papel{{ e.papeles_pendientes|length|pluralize:"es" }}</span>{% endif %}
       </td>
       <td>
         {% if e.renovacion %}
@@ -139,6 +140,7 @@
           <a href="{% url 'detalle_usuario' e.perfil.id %}">{{ e.perfil.nombre_completo }}</a>
         {% else %}{{ e.perfil.nombre_completo }}{% endif %}
         {% if e.cancelacion %}<span class="estado estado-cancelacion_solicitada">Pidió cancelar</span>{% endif %}
+        {% if e.papeles_pendientes %}<span class="estado estado-papeles" title="Le faltan: {% for d in e.papeles_pendientes %}{{ d.nombre }}{% if not forloop.last %}, {% endif %}{% endfor %}">Faltan {{ e.papeles_pendientes|length }} papel{{ e.papeles_pendientes|length|pluralize:"es" }}</span>{% endif %}
       </td>
         <td>{{ e.perfil.edad }}</td>
         <td>{{ e.perfil.telefono }}</td>
@@ -221,6 +223,7 @@ mandar a uno solo—, que es HTML inválido y el navegador lo desarma a su gusto
           <a href="{% url 'detalle_usuario' e.perfil.id %}">{{ e.perfil.nombre_completo }}</a>
         {% else %}{{ e.perfil.nombre_completo }}{% endif %}
         {% if e.cancelacion %}<span class="estado estado-cancelacion_solicitada">Pidió cancelar</span>{% endif %}
+        {% if e.papeles_pendientes %}<span class="estado estado-papeles" title="Le faltan: {% for d in e.papeles_pendientes %}{{ d.nombre }}{% if not forloop.last %}, {% endif %}{% endfor %}">Faltan {{ e.papeles_pendientes|length }} papel{{ e.papeles_pendientes|length|pluralize:"es" }}</span>{% endif %}
       </td>
       <td>{{ e.perfil.edad }}</td>
       <td>{{ e.perfil.telefono }}</td>

@@ -46,6 +46,14 @@ urlpatterns = [
     path("gestion/", views_gestion.GestionInicioView.as_view(), name="gestion_inicio"),
     path("gestion/estadisticas/", views_gestion.estadisticas, name="gestion_estadisticas"),
     path("gestion/institucion/", views_gestion.configuracion_institucion, name="gestion_configuracion"),
+    path(
+        "gestion/institucion/documentos/nuevo/",
+        views_gestion.documento_requerido_nuevo, name="documento_requerido_nuevo",
+    ),
+    path(
+        "gestion/institucion/documentos/<int:documento_id>/alternar/",
+        views_gestion.documento_requerido_alternar, name="documento_requerido_alternar",
+    ),
     path("gestion/matriculas/", views_gestion.ventana_matriculas, name="gestion_matriculas"),
     path("gestion/cancelaciones/", views_gestion.gestion_cancelaciones, name="gestion_cancelaciones"),
     path(

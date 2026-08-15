@@ -20,6 +20,7 @@ from django.contrib.auth.models import User
 from django.contrib.messages import get_messages
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management.base import CommandError
 from django.template.loader import render_to_string
 from django.test import SimpleTestCase, TestCase
@@ -29,7 +30,8 @@ from django.utils import timezone
 from .models import (
     RANURA_MAXIMA_ABSOLUTA,
     Acudiente, Area, Asistencia, Clase, ConfiguracionInstitucion, ConfirmacionClase,
-    CupoPromotoria, DatosEstudiante, EncuestaDemografica, Grupo,
+    CupoPromotoria, DatosEstudiante, DocumentoEstudiante, DocumentoRequerido,
+    EncuestaDemografica, Grupo,
     Matricula, Perfil, Periodo, Promotoria, clases_por_confirmar,
     historial_por_periodo,
     matriculas_renovables, resumen_asistencia_estudiante, resumen_asistencia_grupo,
@@ -3642,3 +3644,235 @@ class PanelAsistenciaTests(TestCase):
         respuesta = self.client.get(reverse("detalle_usuario", args=[self.profesor.id]))
 
         self.assertContains(respuesta, "Clases dictadas")
+
+class DocumentosRequeridosTests(TestCase):
+    """Qué papeles pide la institución, y quién se entera de que faltan.
+
+    La lista es un registro editable y no una constante porque cambia de una
+    entidad a otra. De ahí salen las dos reglas que más se prueban aquí: que un
+    papel se DESACTIVE en vez de borrarse —los archivos entregados cuelgan de
+    él—, y que solo los obligatorios marquen la matrícula como incompleta.
+    """
+
+    def setUp(self):
+        self.periodo = Periodo.objects.create(
+            nombre="2026-2", fecha_inicio=date(2026, 7, 1), fecha_fin=date(2026, 12, 15),
+            activo=True, matriculas_abiertas=True,
+        )
+        self.area = Area.objects.create(nombre="Música")
+        self.profesor = self.crear("profe", "profesor", "Profe Díaz")
+        self.admin = self.crear("admin1", "administrador", "Admin")
+        self.director = self.crear("dire", "director", "Directora")
+        self.violin = Promotoria.objects.create(
+            nombre="Violín", area=self.area, profesor=self.profesor)
+        self.ana = self.crear("ana", "estudiante", "Ana Ruiz")
+        self.datos = DatosEstudiante.objects.create(
+            perfil=self.ana, documento_identidad="111")
+        self.matricula = Matricula(
+            estudiante=self.ana, promotoria=self.violin, periodo=self.periodo,
+            estado="activa")
+        self.matricula.full_clean()
+        self.matricula.save()
+
+        self.eps = DocumentoRequerido.objects.create(nombre="Certificado de EPS")
+        self.foto = DocumentoRequerido.objects.create(
+            nombre="Foto tipo documento", obligatorio=False)
+
+    def crear(self, username, rol, nombre):
+        usuario = User.objects.create_user(username=username, password="x")
+        return Perfil.objects.create(
+            usuario=usuario, rol=rol, nombre_completo=nombre,
+            fecha_nacimiento=date(1995, 3, 4), telefono="3000000000")
+
+    def entregar(self, requerido, datos=None):
+        return DocumentoEstudiante.objects.create(
+            datos=datos or self.datos, requerido=requerido,
+            archivo=SimpleUploadedFile("papel.txt", b"contenido"))
+
+    def obligatorios_faltantes(self, datos=None):
+        datos = datos or self.datos
+        return [d.nombre for d in datos.documentos_faltantes() if d.obligatorio]
+
+    # -- qué cuenta como "le faltan papeles" --------------------------------
+
+    def test_un_papel_sin_subir_es_un_papel_que_falta(self):
+        self.assertEqual(self.obligatorios_faltantes(), ["Certificado de EPS"])
+
+    def test_al_subirlo_deja_de_faltar(self):
+        self.entregar(self.eps)
+
+        self.assertEqual(self.obligatorios_faltantes(), [])
+
+    def test_un_papel_opcional_no_deja_la_matrícula_incompleta(self):
+        """Si contara, la etiqueta dejaría de significar «hay que llamar a esta
+        persona» y el personal aprendería a ignorarla."""
+        self.entregar(self.eps)
+
+        faltantes = self.datos.documentos_faltantes()
+
+        self.assertIn(self.foto, faltantes)
+        self.assertEqual(self.obligatorios_faltantes(), [])
+
+    def test_un_papel_desactivado_deja_de_pedirse(self):
+        self.eps.activo = False
+        self.eps.save()
+
+        self.assertEqual(self.obligatorios_faltantes(), [])
+
+    # -- desactivar, nunca borrar -------------------------------------------
+
+    def test_dejar_de_pedir_un_papel_conserva_lo_entregado(self):
+        """Los archivos cuelgan del requisito: borrarlo se llevaría la prueba
+        de que el estudiante cumplió en su momento."""
+        self.entregar(self.eps)
+        self.client.force_login(self.admin.usuario)
+
+        self.client.post(reverse("documento_requerido_alternar", args=[self.eps.id]))
+
+        self.eps.refresh_from_db()
+        self.assertFalse(self.eps.activo)
+        self.assertTrue(DocumentoRequerido.objects.filter(pk=self.eps.pk).exists())
+        self.assertEqual(DocumentoEstudiante.objects.filter(requerido=self.eps).count(), 1)
+
+    def test_volver_a_pedirlo_lo_reactiva(self):
+        self.eps.activo = False
+        self.eps.save()
+        self.client.force_login(self.admin.usuario)
+
+        self.client.post(reverse("documento_requerido_alternar", args=[self.eps.id]))
+
+        self.eps.refresh_from_db()
+        self.assertTrue(self.eps.activo)
+
+    # -- quién administra la lista ------------------------------------------
+
+    def test_solo_el_administrador_agrega_documentos(self):
+        """Es identidad de la entidad, como el resto de la pantalla de
+        Institución — el director gestiona el catálogo académico, no esto."""
+        self.client.force_login(self.director.usuario)
+
+        self.client.post(reverse("documento_requerido_nuevo"), {
+            "nombre": "Recibo", "descripcion": "", "obligatorio": "on", "orden": 0})
+
+        self.assertFalse(DocumentoRequerido.objects.filter(nombre="Recibo").exists())
+
+    def test_el_administrador_agrega_uno_nuevo(self):
+        self.client.force_login(self.admin.usuario)
+
+        self.client.post(reverse("documento_requerido_nuevo"), {
+            "nombre": "Recibo de servicios", "descripcion": "", "obligatorio": "on", "orden": 3})
+
+        self.assertTrue(DocumentoRequerido.objects.filter(nombre="Recibo de servicios").exists())
+
+    def test_no_se_repite_el_mismo_nombre(self):
+        self.client.force_login(self.admin.usuario)
+
+        self.client.post(reverse("documento_requerido_nuevo"), {
+            "nombre": "Certificado de EPS", "descripcion": "", "orden": 0})
+
+        self.assertEqual(DocumentoRequerido.objects.filter(nombre="Certificado de EPS").count(), 1)
+
+    def test_la_pantalla_los_lista_en_el_orden_configurado(self):
+        """Al agregar un Count, Django mete el `ordering` del Meta en el GROUP
+        BY y el orden declarado deja de valer: llegaban del revés."""
+        DocumentoRequerido.objects.filter(pk=self.eps.pk).update(orden=1)
+        DocumentoRequerido.objects.filter(pk=self.foto.pk).update(orden=2)
+        self.client.force_login(self.admin.usuario)
+
+        respuesta = self.client.get(reverse("gestion_configuracion"))
+
+        self.assertEqual(
+            [d.nombre for d in respuesta.context["documentos"]],
+            ["Certificado de EPS", "Foto tipo documento"],
+        )
+
+    def test_la_pantalla_cuenta_cuantos_lo_entregaron(self):
+        self.entregar(self.eps)
+        self.client.force_login(self.admin.usuario)
+
+        respuesta = self.client.get(reverse("gestion_configuracion"))
+
+        entregados = {d.nombre: d.entregados for d in respuesta.context["documentos"]}
+        self.assertEqual(entregados["Certificado de EPS"], 1)
+        self.assertEqual(entregados["Foto tipo documento"], 0)
+
+    # -- el estudiante los sube ---------------------------------------------
+
+    def test_el_estudiante_ve_una_ranura_por_papel(self):
+        self.client.force_login(self.ana.usuario)
+
+        respuesta = self.client.get(reverse("mi_perfil"))
+
+        self.assertContains(respuesta, "Certificado de EPS")
+        self.assertContains(respuesta, "Foto tipo documento")
+
+    def test_subir_un_papel_lo_guarda_contra_su_requisito(self):
+        self.client.force_login(self.ana.usuario)
+
+        self.client.post(reverse("mi_perfil"), {
+            "accion": "papel", "documento_id": self.eps.id,
+            "archivo": SimpleUploadedFile("eps.txt", b"contenido"),
+        })
+
+        self.assertTrue(
+            DocumentoEstudiante.objects.filter(datos=self.datos, requerido=self.eps).exists())
+
+    def test_subirlo_otra_vez_lo_reemplaza_y_no_lo_duplica(self):
+        """La restricción es un archivo por papel y estudiante: sin esto, un
+        segundo intento reventaría contra la base en vez de reemplazar."""
+        self.client.force_login(self.ana.usuario)
+        for contenido in (b"viejo", b"nuevo"):
+            self.client.post(reverse("mi_perfil"), {
+                "accion": "papel", "documento_id": self.eps.id,
+                "archivo": SimpleUploadedFile("eps.txt", contenido),
+            })
+
+        self.assertEqual(
+            DocumentoEstudiante.objects.filter(datos=self.datos, requerido=self.eps).count(), 1)
+
+    def test_no_se_puede_subir_contra_un_papel_que_ya_no_se_pide(self):
+        self.eps.activo = False
+        self.eps.save()
+        self.client.force_login(self.ana.usuario)
+
+        respuesta = self.client.post(reverse("mi_perfil"), {
+            "accion": "papel", "documento_id": self.eps.id,
+            "archivo": SimpleUploadedFile("eps.txt", b"x"),
+        })
+
+        self.assertEqual(respuesta.status_code, 404)
+
+    # -- el personal se entera ----------------------------------------------
+
+    def test_la_ficha_marca_al_que_le_faltan_papeles(self):
+        self.client.force_login(self.director.usuario)
+
+        respuesta = self.client.get(reverse("detalle_usuario", args=[self.ana.id]))
+
+        self.assertContains(respuesta, 'class="estado estado-papeles"')
+        self.assertContains(respuesta, "Certificado de EPS")
+
+    def test_la_ficha_no_marca_al_que_los_tiene_todos(self):
+        self.entregar(self.eps)
+        self.client.force_login(self.director.usuario)
+
+        respuesta = self.client.get(reverse("detalle_usuario", args=[self.ana.id]))
+
+        self.assertNotContains(respuesta, 'class="estado estado-papeles"')
+
+    def test_el_panel_del_profesor_marca_al_que_le_faltan(self):
+        self.client.force_login(self.profesor.usuario)
+
+        respuesta = self.client.get(reverse("panel"))
+
+        self.assertContains(respuesta, 'class="estado estado-papeles"')
+
+    def test_sin_documentos_configurados_nadie_sale_marcado(self):
+        """Una institución que no pide papeles no debería ver la etiqueta en
+        ninguna parte."""
+        DocumentoRequerido.objects.all().delete()
+        self.client.force_login(self.profesor.usuario)
+
+        respuesta = self.client.get(reverse("panel"))
+
+        self.assertNotContains(respuesta, 'class="estado estado-papeles"')

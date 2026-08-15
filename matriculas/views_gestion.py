@@ -12,12 +12,13 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.views.generic import CreateView, DeleteView, ListView, TemplateView, UpdateView
 
-from .forms import ConfiguracionInstitucionForm, UsuarioForm
+from .forms import ConfiguracionInstitucionForm, DocumentoRequeridoForm, UsuarioForm
 from .models import (
     Acudiente, Area, ConfiguracionInstitucion, CupoPromotoria, DatosEstudiante,
-    EncuestaDemografica, Grupo, Matricula, Perfil, Periodo, Promotoria,
+    DocumentoRequerido, EncuestaDemografica, Grupo, Matricula, Perfil, Periodo,
+    Promotoria,
 )
-from .views import _ficha_estudiante, requiere_rol
+from .views import _ficha_estudiante, documentos_exigidos, requiere_rol
 
 ROLES_GESTION = ("director", "administrador")
 
@@ -165,7 +166,58 @@ def configuracion_institucion(request):
     return render(request, "matriculas/gestion_configuracion.html", {
         "form": form,
         "configuracion": configuracion,
+        "form_documento": DocumentoRequeridoForm(),
+        # Los desactivados también se listan: son los que dejaron de pedirse
+        # pero conservan lo entregado, y esconderlos haría creer que se
+        # perdieron.
+        # El order_by explícito NO sobra: al agregar un Count, Django mete los
+        # campos del `ordering` del Meta en el GROUP BY y el orden que sale ya
+        # no es el declarado — aquí llegaba del revés.
+        "documentos": DocumentoRequerido.objects.annotate(
+            entregados=Count("entregas", filter=Q(entregas__archivo__gt="")),
+        ).order_by("orden", "nombre"),
     })
+
+
+@requiere_rol("administrador")
+def documento_requerido_nuevo(request):
+    """Agrega un papel a la lista de los que se piden."""
+    if request.method != "POST":
+        return redirect("gestion_configuracion")
+
+    form = DocumentoRequeridoForm(request.POST)
+    if form.is_valid():
+        form.save()
+        messages.success(
+            request, f"«{form.instance.nombre}» ya se le pide a los estudiantes.")
+    else:
+        # Los errores se muestran como aviso y no repintando el formulario:
+        # este vive dentro de la pantalla de configuración, y devolverlo con
+        # estado obligaría a reconstruir todo lo demás para enseñar una frase.
+        messages.error(request, " ".join(
+            f"{campo}: {' '.join(errores)}" for campo, errores in form.errors.items()))
+    return redirect("gestion_configuracion")
+
+
+@requiere_rol("administrador")
+def documento_requerido_alternar(request, documento_id):
+    """Deja de pedir un papel, o vuelve a pedirlo.
+
+    No lo borra a propósito. Los archivos que ya subieron los estudiantes
+    cuelgan del requisito: borrarlo se llevaría por delante la prueba de que en
+    su momento cumplieron, y eso no se puede deshacer.
+    """
+    if request.method != "POST":
+        return redirect("gestion_configuracion")
+
+    documento = get_object_or_404(DocumentoRequerido, pk=documento_id)
+    documento.activo = not documento.activo
+    documento.save(update_fields=["activo"])
+    messages.success(request, (
+        f"«{documento.nombre}» vuelve a pedirse." if documento.activo else
+        f"«{documento.nombre}» deja de pedirse. Lo ya entregado se conserva."
+    ))
+    return redirect("gestion_configuracion")
 
 
 @requiere_rol(*ROLES_GESTION)
@@ -1068,7 +1120,7 @@ def grupo_estudiantes(request, grupo_id):
     ]
     return render(request, "matriculas/gestion_grupo_estudiantes.html", {
         "grupo": grupo,
-        "estudiantes": [_ficha_estudiante(m) for m in matriculas],
+        "estudiantes": [_ficha_estudiante(m, documentos_exigidos()) for m in matriculas],
         "migas": migas,
     })
 
@@ -1140,8 +1192,9 @@ class UsuarioListView(RolGestionRequiredMixin, ListView):
 
     def get_queryset(self):
         # Los pendientes de rol (rol="") quedan primero para que no se pierdan de vista.
-        qs = Perfil.objects.select_related("usuario").order_by("rol", "nombre_completo")
         sel = self.seleccion = self._seleccion()
+
+        qs = Perfil.objects.select_related("usuario").order_by("rol", "nombre_completo")
 
         if sel["rol"] == ROL_PENDIENTE:
             qs = qs.filter(rol="")

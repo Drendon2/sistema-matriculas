@@ -23,7 +23,8 @@ from .forms import (
 )
 from .models import (
     Acudiente, Asistencia, Clase, ConfiguracionInstitucion, ConfirmacionClase,
-    CupoPromotoria, DatosEstudiante, EncuestaSatisfaccion, Grupo, Matricula,
+    CupoPromotoria, DatosEstudiante, DocumentoEstudiante, DocumentoRequerido,
+    EncuestaSatisfaccion, Grupo, Matricula,
     Perfil, Periodo, Promotoria, clases_por_confirmar, historial_por_periodo,
     limite_promotorias, matriculas_renovables, resumen_asistencia_estudiante,
     resumen_asistencia_grupo, resumen_asistencia_profesor, resumen_trayectoria,
@@ -773,7 +774,17 @@ def _dicta_la_promotoria(perfil, promotoria):
     return promotoria.profesor_id is not None and promotoria.profesor_id == perfil.id
 
 
-def _ficha_estudiante(matricula):
+def documentos_exigidos():
+    """Los papeles que la institución pide ahora mismo, resueltos una vez.
+
+    Se pasa a `_ficha_estudiante` en los listados: sin esto, la marca de
+    "faltan papeles" cuesta una consulta por estudiante y el panel de una
+    promotoría con cuarenta hace cuarenta.
+    """
+    return list(DocumentoRequerido.objects.filter(activo=True))
+
+
+def _ficha_estudiante(matricula, exigidos=None):
     est = matricula.estudiante
     datos_est = getattr(est, "datos_estudiante", None)
     # ¿Ya cursó ESTA promotoría en otro periodo? Es lo que separa una renovación
@@ -792,6 +803,12 @@ def _ficha_estudiante(matricula):
         # El profesor se entera de que el estudiante está de salida, pero la
         # decisión no es suya: la marca es informativa y no trae botones.
         "cancelacion": matricula.cancelacion_pendiente,
+        # Solo los OBLIGATORIOS: un papel opcional que falta no deja la
+        # matrícula incompleta, y marcarla igual haría que la etiqueta dejara
+        # de significar "hay que llamar a esta persona".
+        "papeles_pendientes": [
+            d for d in datos_est.documentos_faltantes(exigidos) if d.obligatorio
+        ] if datos_est else [],
     }
 
 
@@ -809,6 +826,7 @@ def panel(request):
     """
     perfil = request.perfil
     periodo = Periodo.objects.filter(activo=True).first()
+    exigidos = documentos_exigidos()
     promotorias_qs = Promotoria.objects.select_related("area", "profesor").prefetch_related("grupos")
     if perfil.rol == "profesor":
         promotorias_qs = promotorias_qs.filter(profesor=perfil)
@@ -831,26 +849,30 @@ def panel(request):
                 estado__in=Matricula.ESTADOS_INSCRITO
             ).select_related(
                 "estudiante", "estudiante__datos_estudiante", "estudiante__datos_estudiante__acudiente"
-            )
+            ).prefetch_related("estudiante__datos_estudiante__documentos")
             grupos_info.append({
                 "grupo": grupo,
-                "estudiantes": [_ficha_estudiante(m) for m in matriculas],
+                "estudiantes": [_ficha_estudiante(m, exigidos) for m in matriculas],
                 "clase_hoy": clases_de_hoy.get(grupo.id),
             })
 
         sin_grupo = Matricula.objects.filter(
             promotoria=promotoria, estado__in=Matricula.ESTADOS_INSCRITO, grupo__isnull=True
-        ).select_related("estudiante", "estudiante__datos_estudiante", "estudiante__datos_estudiante__acudiente")
+        ).select_related(
+            "estudiante", "estudiante__datos_estudiante", "estudiante__datos_estudiante__acudiente"
+        ).prefetch_related("estudiante__datos_estudiante__documentos")
 
         pendientes = Matricula.objects.filter(
             promotoria=promotoria, estado="pendiente"
-        ).select_related("estudiante", "estudiante__datos_estudiante", "estudiante__datos_estudiante__acudiente")
+        ).select_related(
+            "estudiante", "estudiante__datos_estudiante", "estudiante__datos_estudiante__acudiente"
+        ).prefetch_related("estudiante__datos_estudiante__documentos")
 
         datos.append({
             "promotoria": promotoria,
             "grupos": grupos_info,
-            "sin_grupo": [_ficha_estudiante(m) for m in sin_grupo],
-            "pendientes": [_ficha_estudiante(m) for m in pendientes],
+            "sin_grupo": [_ficha_estudiante(m, exigidos) for m in sin_grupo],
+            "pendientes": [_ficha_estudiante(m, exigidos) for m in pendientes],
             "puede_gestionar": _puede_gestionar_promotoria(perfil, promotoria),
             # Más estrecho que lo anterior: el botón de clase es solo del
             # profesor que la dicta (ver `_dicta_la_promotoria`).
@@ -1415,6 +1437,12 @@ def detalle_usuario(request, perfil_id):
     )
 
     datos_estudiante = getattr(objetivo, "datos_estudiante", None) if es_estudiante else None
+    # Solo los obligatorios: un papel opcional que falta no deja la matrícula
+    # incompleta. La etiqueta la ve todo el personal —es una gestión pendiente,
+    # no un dato sensible—, pero los ARCHIVOS siguen siendo del administrador.
+    papeles_pendientes = [
+        d for d in datos_estudiante.documentos_faltantes() if d.obligatorio
+    ] if datos_estudiante else []
 
     # El panel de asistencia sigue la misma matriz que el resto de la ficha: un
     # profesor ve lo de SUS promotorías y no la asistencia del estudiante en
@@ -1432,6 +1460,7 @@ def detalle_usuario(request, perfil_id):
         "objetivo": objetivo,
         "es_estudiante": es_estudiante,
         "ve_contacto": ve_contacto,
+        "papeles_pendientes": papeles_pendientes,
         "asistencia": asistencia,
         "periodo": periodo,
         "acudiente": datos_estudiante.acudiente if datos_estudiante and ve_contacto else None,
@@ -1649,6 +1678,24 @@ def mi_perfil(request):
         else:
             documento_form = CopiaDocumentoForm(instance=datos_estudiante)
 
+        # Los papeles variables de la institución. Cada uno es su propio envío
+        # —una ranura, un archivo— y no un formulario grande: subirlos así, a
+        # medida que se consiguen, es como se hace en la vida real, y un único
+        # botón "guardar todo" obligaría a tenerlos todos a la mano.
+        if request.method == "POST" and accion == "papel":
+            requerido = get_object_or_404(
+                DocumentoRequerido, pk=request.POST.get("documento_id"), activo=True)
+            archivo = request.FILES.get("archivo")
+            if archivo is None:
+                messages.error(request, "Elige un archivo antes de subirlo.")
+            else:
+                entrega, _ = DocumentoEstudiante.objects.get_or_create(
+                    datos=datos_estudiante, requerido=requerido)
+                entrega.archivo = archivo
+                entrega.save()
+                messages.success(request, f"«{requerido.nombre}» quedó guardado.")
+            return redirect("mi_perfil")
+
     if request.method == "POST" and accion == "encuesta":
         encuesta_form = EncuestaDemograficaForm(request.POST, instance=encuesta)
         if perfil.es_menor:
@@ -1673,6 +1720,16 @@ def mi_perfil(request):
         "foto_form": foto_form,
         "contacto_form": contacto_form,
         "documento_form": documento_form,
+        # Una ranura por papel pedido, con lo que ya subió si es que subió algo.
+        "papeles": [
+            {
+                "requerido": requerido,
+                "entrega": next(
+                    (d for d in datos_estudiante.documentos.all()
+                     if d.requerido_id == requerido.id and d.archivo), None),
+            }
+            for requerido in documentos_exigidos()
+        ] if datos_estudiante is not None else [],
         "encuesta_form": encuesta_form,
         "encuesta": encuesta,
         # Vacía cuando no hay nada que pedir, así que la plantilla la usa

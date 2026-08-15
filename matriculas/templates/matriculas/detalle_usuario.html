@@ -14,7 +14,15 @@
     <div class="carne-foto-vacia" style="width:64px;height:64px;"></div>
   {% endif %}
   <div class="carne-datos">
-    <div class="carne-nombre" style="font-size:1.1rem;">{{ objetivo.nombre_completo }}</div>
+    <div class="carne-nombre" style="font-size:1.1rem;">
+      {{ objetivo.nombre_completo }}
+      {% if papeles_pendientes %}
+      <span class="estado estado-papeles"
+            title="Le faltan: {% for d in papeles_pendientes %}{{ d.nombre }}{% if not forloop.last %}, {% endif %}{% endfor %}">
+        Faltan {{ papeles_pendientes|length }} papel{{ papeles_pendientes|length|pluralize:"es" }}
+      </span>
+      {% endif %}
+    </div>
     <div class="carne-detalle">
       {{ objetivo.usuario.username }} ·
       {% if objetivo.rol %}{{ objetivo.get_rol_display }}{% else %}Pendiente de rol{% endif %} ·
