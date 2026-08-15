@@ -10,6 +10,14 @@
 <h2>{{ grupo.get_nivel_display }} · {{ grupo.horario }} · Salón {{ grupo.salon }}</h2>
 <p class="campo-info" style="margin-top:-0.8rem;">{{ estudiantes|length }}/{{ grupo.cupo_maximo }} cupos ocupados</p>
 
+{% comment %}
+  El único camino desde Gestión al registro de clases. Director y administrador
+  navegan el catálogo por aquí, no por el Panel, y sin este enlace la asistencia
+  —que ellos SÍ pueden consultar, aunque no editar— quedaba a un clic que no
+  existía en ninguna parte de su recorrido.
+{% endcomment %}
+<p><a class="btn btn-secundario btn-sm" href="{% url 'grupo_clases' grupo.id %}">Ver clases y asistencia</a></p>
+
 {% if not estudiantes %}
   <p class="vacio">Todavía no hay estudiantes en este grupo.</p>
 {% else %}

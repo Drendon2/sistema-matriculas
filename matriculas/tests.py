@@ -2688,3 +2688,74 @@ class ComandoSimularTests(TestCase):
             self.simular(estudiantes=5)
 
         self.assertFalse(User.objects.filter(username__startswith="sim.").exists())
+
+
+class GestionVeElRegistroTests(TestCase):
+    """Lo que dirección necesita VER del catálogo y de la asistencia.
+
+    Dirección no puede escribir la asistencia (ver `AsistenciaSoloDelProfesorTests`),
+    pero sí consultarla, y navega el catálogo por Gestión y no por el Panel. Aquí
+    se cubren las dos cosas que le faltaban a ese recorrido: saber quién dicta
+    cada promotoría sin tener que abrirla una por una, y poder llegar al registro
+    de clases de un grupo.
+    """
+
+    def setUp(self):
+        self.periodo = Periodo.objects.create(
+            nombre="2026-2", fecha_inicio=date(2026, 7, 1), fecha_fin=date(2026, 12, 15),
+            activo=True, matriculas_abiertas=True,
+        )
+        self.area = Area.objects.create(nombre="Música")
+        self.profesor = self.crear_perfil("profe", "Profe Díaz", "profesor")
+        self.director = self.crear_perfil("dire", "Directora", "director")
+        self.violin = Promotoria.objects.create(
+            nombre="Violín", area=self.area, profesor=self.profesor,
+        )
+        self.huerfana = Promotoria.objects.create(nombre="Títeres", area=self.area)
+        self.grupo = Grupo.objects.create(
+            promotoria=self.violin, nivel="basico", horario="Lunes 4pm",
+            salon="A1", cupo_maximo=10,
+        )
+        self.client.force_login(self.director.usuario)
+
+    def crear_perfil(self, username, nombre, rol):
+        usuario = User.objects.create_user(username=username, password="x")
+        return Perfil.objects.create(
+            usuario=usuario, rol=rol, nombre_completo=nombre,
+            fecha_nacimiento=date(1990, 1, 1), telefono="3000000000",
+        )
+
+    # -- quién dicta, en la lista -------------------------------------------
+
+    def test_la_lista_de_promotorias_dice_quien_la_dicta(self):
+        respuesta = self.client.get(reverse("promotoria_lista"))
+
+        self.assertContains(respuesta, "Profe Díaz")
+
+    def test_tambien_al_entrar_por_departamento(self):
+        """Son dos listas distintas sobre la misma plantilla; se olvida una fácil."""
+        respuesta = self.client.get(reverse("promotorias_por_area", args=[self.area.id]))
+
+        self.assertContains(respuesta, "Profe Díaz")
+
+    def test_la_promotoria_sin_profesor_lo_dice(self):
+        """No es un hueco cosmético: ahí nadie puede registrar clases."""
+        respuesta = self.client.get(reverse("promotoria_lista"))
+
+        self.assertContains(respuesta, "Sin asignar")
+
+    def test_las_otras_listas_del_catalogo_no_hablan_de_profesores(self):
+        """La plantilla la comparten cuatro catálogos; solo promotorías tiene profesor."""
+        respuesta = self.client.get(reverse("area_lista"))
+
+        self.assertNotContains(respuesta, "Profesor:")
+
+    # -- llegar al registro de clases ---------------------------------------
+
+    def test_desde_el_grupo_en_gestion_se_llega_a_sus_clases(self):
+        destino = reverse("grupo_clases", args=[self.grupo.id])
+
+        respuesta = self.client.get(reverse("grupo_estudiantes", args=[self.grupo.id]))
+
+        self.assertContains(respuesta, destino)
+        self.assertEqual(self.client.get(destino).status_code, 200)

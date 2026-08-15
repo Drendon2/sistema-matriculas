@@ -25,6 +25,22 @@
         {% if mostrar_tag_area %}<span class="tag-dot {{ obj|tag_color }}"></span>{% endif %}
         {% if url_fila %}<a href="{% url url_fila obj.pk %}">{{ obj }}</a>{% else %}{{ obj }}{% endif %}
         {% if etiqueta_plural %}<span class="campo-info" style="margin:0;display:inline;">— {{ obj.total_hijos }} {% if obj.total_hijos == 1 %}{{ etiqueta_singular }}{% else %}{{ etiqueta_plural }}{% endif %}</span>{% endif %}
+        {% comment %}
+          Quién dicta, en su propio renglón: esta lista es la de un catálogo y
+          en ella "sin asignar" no es un hueco cosmético — es la promotoría en
+          la que nadie puede registrar clases. Solo aparece donde tiene sentido
+          (las dos listas de promotorías), igual que el punto de color de Área.
+        {% endcomment %}
+        {% if mostrar_profesor %}
+        <span class="campo-info" style="margin:0;display:block;">
+          Profesor:
+          {% if obj.profesor %}
+            {% if obj.profesor|ficha_visible_para:user.perfil %}
+              <a href="{% url 'detalle_usuario' obj.profesor.id %}">{{ obj.profesor.nombre_completo }}</a>
+            {% else %}{{ obj.profesor.nombre_completo }}{% endif %}
+          {% else %}Sin asignar{% endif %}
+        </span>
+        {% endif %}
       </td>
       <td style="text-align:right;white-space:nowrap;">
         <a href="{% url url_editar obj.pk %}">Editar</a>

@@ -795,6 +795,10 @@ class PromotoriaListView(RolGestionRequiredMixin, ListView):
         "titulo": "Promotorías", "url_nuevo": "promotoria_nueva",
         "url_editar": "promotoria_editar", "url_eliminar": "promotoria_eliminar",
         "url_fila": "grupos_por_promotoria", "etiqueta_singular": "grupo", "etiqueta_plural": "grupos",
+        # Quién dicta cada una. `gestion_lista.html` sirve a cuatro catálogos y
+        # solo las promotorías tienen profesor, así que va por bandera y no
+        # metido en la plantilla para todos.
+        "mostrar_profesor": True,
     }
 
     def get_queryset(self):
@@ -820,6 +824,7 @@ class PromotoriasPorAreaView(RolGestionRequiredMixin, ListView):
             "titulo": f"Promotorías de {self.area.nombre}",
             "url_nuevo": "promotoria_nueva", "url_editar": "promotoria_editar", "url_eliminar": "promotoria_eliminar",
             "url_fila": "grupos_por_promotoria", "etiqueta_singular": "grupo", "etiqueta_plural": "grupos",
+            "mostrar_profesor": True,
             "preset_campo": "area", "preset_valor": self.area.pk,
             "migas": [{"texto": "Departamentos", "url": reverse("area_lista")}],
         })
