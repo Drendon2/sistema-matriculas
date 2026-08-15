@@ -88,6 +88,7 @@ typography:
     lineHeight: 1.5
     letterSpacing: "normal"
 rounded:
+  dato: "2px"
   sm: "8px"
   md: "12px"
   lg: "18px"
@@ -237,6 +238,19 @@ El estado "activa" (`.estado-activa`) lleva un punto (`::before`) del color del 
 - **Barras** (`.stat-bar-pista`/`.stat-bar-relleno`, `.dash-split`): radio = mitad de su propia altura (`5px` sobre `10px`, `7px` sobre `14px`) — una pista delgada con extremos en píldora.
 - **Celdas de calendario** (`.asis-cel`, el panel de asistencia de las fichas): `--radius-dato`. Un cuadro de `11px` con el radio de un botón sería casi un círculo, y una rejilla de círculos deja de leerse como calendario: la esquina apenas insinuada es lo que mantiene la lectura de cuadrícula.
 
+## Interaction
+
+**Las acciones no recargan la página.** Este sistema se usa por tandas —se confirman quince matrículas seguidas, se reparten treinta estudiantes, se vacía la bandeja de cancelaciones— y una recarga por acción devolvía al usuario al principio de la página cada vez. `acciones-sin-recarga` (en `base.html`) intercepta el envío de cualquier `<form method="post">` dentro de `<main>`, pide la **misma respuesta de siempre** por `fetch` y cambia solo el contenido de `<main>`.
+
+Las vistas no cambiaron: siguen guardando, encolando su mensaje y redirigiendo. El servidor sigue re-renderizando de cero, así que un estudiante que cambia de sección, un contador de cupo o un aviso salen bien sin que nadie reproduzca esa lógica en JavaScript. A mano solo se conserva lo que el navegador perdería: **la posición del scroll** y **qué `<details>` estaban abiertos** — de ahí que los desplegables lleven `id`, que es lo que distingue "reabrir Títeres" de "reabrir el tercero".
+
+Consecuencias para cualquier pantalla nueva:
+
+- **Sin JavaScript todo sigue funcionando.** Ninguna plantilla tuvo que cambiar para entrar; para dejar una acción fuera basta `data-recarga-completa` en el `<form>`.
+- **Un aviso que solo viva arriba no se lee** (ver Banners: los mensajes son pegajosos).
+- **Los `<details>` que deban sobrevivir a una acción necesitan `id`.**
+- **Estado ocupado sin spinner:** `main[aria-busy]` atenúa los controles y bloquea clics, con `0.25s` de retardo en la transición — en local la respuesta llega en 40 ms y sin ese retardo se vería un parpadeo gris en cada clic.
+
 ## Components
 
 ### Buttons
@@ -305,6 +319,24 @@ Quien puede ver la hoja pero no escribirla (director y administrador, ver PRODUC
 
 **Sin marcar no tiene forma propia**, y es deliberado: una opción vacía significa que a esa persona nadie la pasó, y la pantalla lo dice con una cifra ("Falta 1 de 12 por marcar"), no con un cuarto marcador que competiría con los tres reales.
 
+### Panel de asistencia de las fichas (`.asis`) — Signature Component
+Cifras de cabecera + calendario del periodo, en la ficha de una persona. Las cifras van en **fichas sueltas** (`.asis-ficha`: etiqueta pequeña arriba, número grande en tabulares) y no en una gráfica de barras, porque son valores sin eje común — una barra de "racha 3" junto a una de "clases 24" compararía cosas que no se comparan. Máximo **cuatro por fila**: caben más, pero una tira de siete se lee como números sueltos en vez de como grupos.
+
+El calendario (`.asis-cal`) es una rejilla de siete filas y una columna por semana, arrancando siempre en **lunes** — si empezara el día 1 del periodo, cada fila sería un día de la semana distinto y el patrón semanal, que es lo que se va a mirar, dejaría de verse. Las celdas se emiten en orden y es el CSS (`grid-auto-flow: column`) quien las reparte por semanas. La rejilla se desplaza dentro de su envoltorio; la página nunca.
+
+**Las dos fichas codifican cosas distintas y por eso se ven distintas.** En la de un estudiante la celda dice un **estado** (asistió / con excusa / faltó / hubo clase sin marcar) y usa la paleta de estados de abajo; en la de quien dicta dice una **magnitud** (cuántas clases ese día) y usa una sola tinta azul en tres pasos. Compartir codificación haría que el mismo verde significara dos cosas en el mismo sistema.
+
+### Estados de asistencia (paleta validada)
+Tres tonos exclusivos del calendario: **asistió** (`#1baf7a`), **con excusa** (`#eb6834`) y **faltó** (`#b22e22`). No salen de la rampa de gráfica ni de los `tag-*`: son estados con polaridad, no categorías intercambiables. Están **validados como paleta comparando todos los pares** —banda de luminosidad, suelo de croma, separación bajo daltonismo (peor par ΔE 9.2 deutan) y suelo de visión normal (ΔE 16.7)—, no elegidos a ojo, como exige la Regla de la Rampa de Gráfica.
+
+El verde queda en **2.74:1** contra el blanco, por debajo de 3:1, y eso obliga a compensación: **las cifras visibles de la leyenda** son esa compensación y no un adorno. Por la Regla del Marcador, además, ninguno de los cuatro estados depende solo del matiz — *con excusa* lleva un hueco al centro y *sin marcar* contorno punteado sin relleno (la misma metáfora que "pendiente"). Cada celda lleva su fecha y su estado al pasar el cursor: un cuadro de once píxeles se puede mirar, pero no leer.
+
+### Faltan papeles (`.estado-papeles`)
+Reutiliza la **forma** de "pendiente" —contorno punteado, sin relleno— porque dice lo mismo: algo está a medias. No lleva el rojo de "retirada": a nadie se le ha quitado nada, falta una gestión. La cifra va en el texto («Faltan 2 papeles») y el detalle en el `title`, así que no depende del color.
+
+### Barra de lote (`.lote-barra`)
+Pegada encima de su tabla y con el fondo de la superficie alterna, para que se lea como cabecera de esa lista y no como un control suelto. Es **pegajosa** por lo mismo que los avisos: con veinte estudiantes se marca abajo y el botón está arriba. El botón deshabilitado se **atenúa, no se tacha** — sin nadie marcado no hay error, es el estado de reposo. La casilla maestra tiene los **tres** estados: con parte de la lista marcada va en guion (indeterminada), porque marcada o vacía mentirían sobre lo que va a pasar al pulsarla.
+
 ### Navigation
 - **Barra superior:** riel claro (blanco, borde inferior fino), título en negrita frase normal, enlaces en frase normal con fondo suave al pasar el cursor.
 - **Pestañas de sección (`.tarjeta-enlace`):** ficha pineada con el pin de esquina (ver Shapes) — el vocabulario de navegación del hub de Gestión.
@@ -316,7 +348,7 @@ Quien puede ver la hoja pero no escribirla (director y administrador, ver PRODUC
 - Archivo: fondo `surface-alt` para distinguirlo de un campo de texto.
 
 ### Banners
-- **Mensajes de sesión (`.messages`):** variantes éxito (esmeralda) / error (rojo) únicamente.
+- **Mensajes de sesión (`.messages`):** variantes éxito (esmeralda) / error (rojo) únicamente. Son **pegajosos** (`position: sticky`), no fijos: ocupan su sitio en el flujo como siempre, pero acompañan al desplazarse. Desde que las acciones no recargan la página, un aviso que solo viva arriba del todo no lo lee nadie cuando la acción se resolvió en la fila doce de una lista.
 - **Aviso contextual (`.aviso`):** fondo `surface-alt`, borde punteado — nota persistente, disponible en el shell autenticado y en el público.
 
 ### Perfil Hero (Mi Perfil) — Signature Component
