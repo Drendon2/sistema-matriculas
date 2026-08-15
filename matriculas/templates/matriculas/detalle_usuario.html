@@ -132,6 +132,15 @@ en la página, que es lo que llevaba haciendo aquí.
 {% endif %}
 {% endif %}
 
+{% comment %}
+Solo si hay algo que contar. Un panel de ceros no informa de nada y además
+miente por omisión: en una ficha sin clases todavía no se distingue "no ha
+faltado nunca" de "no ha empezado el periodo".
+{% endcomment %}
+{% if asistencia %}
+  {% include "matriculas/_panel_asistencia.html" %}
+{% endif %}
+
 {% if puede_gestionar_usuarios %}
 <p style="margin-top:1.5rem;">
   <a class="btn btn-sm" href="{% url 'usuario_editar' objetivo.id %}">Editar usuario</a>

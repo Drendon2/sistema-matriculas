@@ -13,7 +13,7 @@ y `PantallaConfiguracionTests`.
 
 import math
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from io import StringIO
 
 from django.contrib.auth.models import User
@@ -28,12 +28,12 @@ from django.utils import timezone
 
 from .models import (
     RANURA_MAXIMA_ABSOLUTA,
-    Acudiente, Area, Asistencia, Clase, ConfiguracionInstitucion, CupoPromotoria,
-    DatosEstudiante, EncuestaDemografica, Grupo,
+    Acudiente, Area, Asistencia, Clase, ConfiguracionInstitucion, ConfirmacionClase,
+    CupoPromotoria, DatosEstudiante, EncuestaDemografica, Grupo,
     Matricula, Perfil, Periodo, Promotoria, clases_por_confirmar,
     historial_por_periodo,
-    matriculas_renovables, resumen_asistencia_grupo,
-    resumen_trayectoria,
+    matriculas_renovables, resumen_asistencia_estudiante, resumen_asistencia_grupo,
+    resumen_asistencia_profesor, resumen_trayectoria,
 )
 from .views_gestion import (
     RADIO_TORTA, ROL_PENDIENTE, SEPARACION_TORTA, _stats_choices, _torta,
@@ -3391,3 +3391,254 @@ class AsignacionEnLoteTests(TestCase):
         respuesta = self.client.get(reverse("panel"))
 
         self.assertNotContains(respuesta, f'id="lote-{sin_grupos.id}"')
+
+class PanelAsistenciaTests(TestCase):
+    """El panel de asistencia de las fichas: cifras de cabecera y calendario.
+
+    Lo que más se prueba aquí no son las sumas sino dos cosas que se pueden
+    romper sin que se note a simple vista: que "sin marcar" no se confunda con
+    una falta, y que el calendario no se coma días que las cifras sí cuentan.
+    """
+
+    def setUp(self):
+        self.periodo = Periodo.objects.create(
+            nombre="2026-2", fecha_inicio=date(2026, 7, 27), fecha_fin=date(2026, 12, 15),
+            activo=True, matriculas_abiertas=True,
+        )
+        self.area = Area.objects.create(nombre="Música")
+        self.profesor = self.crear_perfil("profe", "Profe Díaz", "profesor")
+        self.otro = self.crear_perfil("otro", "Otra Profe", "profesor")
+        self.director = self.crear_perfil("dire", "Directora", "director")
+        self.violin = Promotoria.objects.create(
+            nombre="Violín", area=self.area, profesor=self.profesor)
+        self.danza = Promotoria.objects.create(
+            nombre="Danza", area=self.area, profesor=self.otro)
+        self.grupo = Grupo.objects.create(
+            promotoria=self.violin, nivel="basico", horario="Lunes 4pm",
+            salon="A1", cupo_maximo=10)
+        self.grupo_danza = Grupo.objects.create(
+            promotoria=self.danza, nivel="basico", horario="Martes 5pm",
+            salon="B1", cupo_maximo=10)
+        self.ana = self.crear_estudiante("ana", "Ana Ruiz")
+        self.matricula = self.matricular(self.ana, self.grupo)
+
+    def crear_perfil(self, username, nombre, rol):
+        usuario = User.objects.create_user(username=username, password="x")
+        return Perfil.objects.create(
+            usuario=usuario, rol=rol, nombre_completo=nombre,
+            fecha_nacimiento=date(1990, 1, 1), telefono="3000000000")
+
+    def crear_estudiante(self, username, nombre):
+        usuario = User.objects.create_user(username=username, password="x")
+        perfil = Perfil.objects.create(
+            usuario=usuario, rol="estudiante", nombre_completo=nombre,
+            fecha_nacimiento=date(1995, 3, 4), telefono="3000000000")
+        DatosEstudiante.objects.create(perfil=perfil, documento_identidad=username)
+        return perfil
+
+    def matricular(self, perfil, grupo):
+        matricula = Matricula(
+            estudiante=perfil, promotoria=grupo.promotoria, periodo=self.periodo,
+            grupo=grupo, estado="activa")
+        matricula.full_clean()
+        matricula.save()
+        return matricula
+
+    def dar_clase(self, grupo=None, cuando=None, quien=None):
+        clase = Clase.objects.create(
+            grupo=grupo or self.grupo, periodo=self.periodo,
+            registrada_por=quien or self.profesor, confirmaciones_requeridas=1)
+        if cuando is not None:
+            Clase.objects.filter(pk=clase.pk).update(fecha_hora=cuando)
+            clase.refresh_from_db()
+        return clase
+
+    def marcar(self, clase, estado, matricula=None):
+        return Asistencia.objects.create(
+            clase=clase, matricula=matricula or self.matricula, estado=estado)
+
+    def cifras(self, resumen):
+        return {f["etiqueta"]: f["valor"] for f in resumen["fichas"]}
+
+    # -- cifras del estudiante ----------------------------------------------
+
+    def test_cuenta_cada_estado_por_separado(self):
+        self.marcar(self.dar_clase(), "asistio")
+        self.marcar(self.dar_clase(), "asistio")
+        self.marcar(self.dar_clase(), "falto")
+        self.marcar(self.dar_clase(), "excusa")
+
+        cifras = self.cifras(resumen_asistencia_estudiante(self.ana, self.periodo))
+
+        self.assertEqual(cifras["Clases"], 4)
+        self.assertEqual(cifras["Asistió"], 2)
+        self.assertEqual(cifras["Faltó"], 1)
+        self.assertEqual(cifras["Con excusa"], 1)
+
+    def test_una_clase_sin_marca_no_es_una_falta(self):
+        """La ausencia de fila significa que a esa persona nadie la pasó.
+        Contarla como falta le carga al estudiante un descuido del profesor."""
+        self.marcar(self.dar_clase(), "asistio")
+        self.dar_clase()  # nadie pasó lista
+
+        cifras = self.cifras(resumen_asistencia_estudiante(self.ana, self.periodo))
+
+        self.assertEqual(cifras["Sin marcar"], 1)
+        self.assertEqual(cifras["Faltó"], 0)
+
+    def test_el_porcentaje_sale_solo_de_las_clases_con_marca(self):
+        """Si las sin marcar entraran al denominador, el profesor que no pasa
+        lista le bajaría la asistencia a un estudiante que sí fue."""
+        self.marcar(self.dar_clase(), "asistio")
+        self.dar_clase()
+
+        cifras = self.cifras(resumen_asistencia_estudiante(self.ana, self.periodo))
+
+        self.assertEqual(cifras["Asistencia"], "100%")
+
+    def test_la_racha_la_rompe_una_excusa(self):
+        """Una excusa justifica la falta, no la asistencia."""
+        self.marcar(self.dar_clase(cuando=timezone.now() - timedelta(days=3)), "asistio")
+        self.marcar(self.dar_clase(cuando=timezone.now() - timedelta(days=2)), "excusa")
+        self.marcar(self.dar_clase(cuando=timezone.now() - timedelta(days=1)), "asistio")
+
+        cifras = self.cifras(resumen_asistencia_estudiante(self.ana, self.periodo))
+
+        self.assertEqual(cifras["Racha"], "1")
+
+    def test_sin_matricula_con_grupo_no_hay_panel(self):
+        """Un panel de ceros no informa: en una ficha sin clases no se distingue
+        "no ha faltado nunca" de "no ha empezado el periodo"."""
+        nadie = self.crear_estudiante("beto", "Beto Páez")
+
+        self.assertIsNone(resumen_asistencia_estudiante(nadie, self.periodo))
+
+    # -- el calendario no puede perder días ---------------------------------
+
+    def test_el_calendario_cubre_las_clases_previas_al_inicio_del_periodo(self):
+        """Una clase pertenece al periodo por su columna `periodo`, no por su
+        fecha. La registrada la semana previa a la apertura seguía contándose en
+        las cifras y desaparecía del calendario."""
+        antes = timezone.make_aware(datetime(2026, 7, 20, 16, 0))
+        self.marcar(self.dar_clase(cuando=antes), "asistio")
+
+        resumen = resumen_asistencia_estudiante(self.ana, self.periodo)
+
+        pintadas = [c for c in resumen["celdas"] if c["clase"]]
+        self.assertEqual(len(pintadas), 1)
+        self.assertEqual(pintadas[0]["fecha"], date(2026, 7, 20))
+
+    def test_el_calendario_empieza_en_lunes(self):
+        """Se pinta en columnas de siete: si no arrancara en lunes, cada fila
+        sería un día de la semana distinto y el patrón semanal no se vería."""
+        self.marcar(self.dar_clase(), "asistio")
+
+        resumen = resumen_asistencia_estudiante(self.ana, self.periodo)
+
+        self.assertEqual(resumen["celdas"][0]["fecha"].weekday(), 0)
+
+    def test_todas_las_celdas_llevan_su_fecha_al_pasar(self):
+        """Un cuadro de once píxeles no dice qué día es: sin el texto al pasar,
+        el calendario se puede mirar y no se puede leer."""
+        self.marcar(self.dar_clase(), "asistio")
+
+        resumen = resumen_asistencia_estudiante(self.ana, self.periodo)
+
+        self.assertTrue(all(c["titulo"] for c in resumen["celdas"]))
+
+    def test_una_falta_tapa_a_una_asistencia_del_mismo_dia(self):
+        """Lo que se busca recorriendo el calendario es dónde están los
+        problemas, así que el día se pinta por lo peor que pasó en él."""
+        otra = self.matricular(self.ana, self.grupo_danza)
+        cuando = timezone.now() - timedelta(days=1)
+        self.marcar(self.dar_clase(cuando=cuando), "asistio")
+        self.marcar(self.dar_clase(grupo=self.grupo_danza, cuando=cuando), "falto", otra)
+
+        resumen = resumen_asistencia_estudiante(self.ana, self.periodo)
+
+        pintadas = [c for c in resumen["celdas"] if c["clase"]]
+        self.assertEqual(len(pintadas), 1)
+        self.assertEqual(pintadas[0]["clase"], "cal-falto")
+
+    # -- privacidad ----------------------------------------------------------
+
+    def test_un_profesor_solo_ve_la_asistencia_de_sus_promotorias(self):
+        """Que pueda abrir la ficha no le da la asistencia del estudiante en
+        otras disciplinas — la misma matriz que el resto de la ficha."""
+        otra = self.matricular(self.ana, self.grupo_danza)
+        self.marcar(self.dar_clase(), "asistio")
+        self.marcar(self.dar_clase(grupo=self.grupo_danza), "falto", otra)
+
+        suyas = Promotoria.objects.filter(profesor=self.profesor)
+        cifras = self.cifras(resumen_asistencia_estudiante(self.ana, self.periodo, suyas))
+
+        self.assertEqual(cifras["Clases"], 1)
+        self.assertEqual(cifras["Faltó"], 0)
+
+    def test_direccion_ve_la_asistencia_completa(self):
+        otra = self.matricular(self.ana, self.grupo_danza)
+        self.marcar(self.dar_clase(), "asistio")
+        self.marcar(self.dar_clase(grupo=self.grupo_danza), "falto", otra)
+
+        cifras = self.cifras(resumen_asistencia_estudiante(self.ana, self.periodo, None))
+
+        self.assertEqual(cifras["Clases"], 2)
+        self.assertEqual(cifras["Faltó"], 1)
+
+    # -- cifras del profesor -------------------------------------------------
+
+    def test_cuenta_las_clases_dictadas_y_cuantas_se_verificaron(self):
+        confirmada = self.dar_clase()
+        ConfirmacionClase.objects.create(clase=confirmada, matricula=self.matricula)
+        self.dar_clase()
+
+        cifras = self.cifras(resumen_asistencia_profesor(self.profesor, self.periodo))
+
+        self.assertEqual(cifras["Clases dictadas"], 2)
+        self.assertEqual(cifras["Verificadas"], 1)
+        self.assertEqual(cifras["Sin verificar"], 1)
+        self.assertEqual(cifras["Verificación"], "50%")
+
+    def test_va_por_quien_la_registro_y_no_por_a_quien_le_toca(self):
+        """Un director que cubrió unas clases aparece con ellas aunque la
+        promotoría no sea suya: describe lo que hizo, no lo que le corresponde."""
+        self.dar_clase(quien=self.director)
+
+        cifras = self.cifras(resumen_asistencia_profesor(self.director, self.periodo))
+
+        self.assertEqual(cifras["Clases dictadas"], 1)
+
+    def test_quien_no_ha_dictado_nada_no_tiene_panel(self):
+        self.assertIsNone(resumen_asistencia_profesor(self.otro, self.periodo))
+
+    def test_el_calendario_del_profesor_mide_cuantas_clases_hubo(self):
+        """Otra pregunta que la del estudiante: aquí la celda dice magnitud, no
+        estado, y por eso lleva una sola tinta en pasos."""
+        cuando = timezone.now() - timedelta(days=1)
+        self.dar_clase(cuando=cuando)
+        self.dar_clase(grupo=self.grupo_danza, cuando=cuando, quien=self.profesor)
+
+        resumen = resumen_asistencia_profesor(self.profesor, self.periodo)
+
+        pintadas = [c for c in resumen["celdas"] if c["clase"]]
+        self.assertEqual(len(pintadas), 1)
+        self.assertEqual(pintadas[0]["clase"], "cal-n2")
+
+    # -- en la pantalla ------------------------------------------------------
+
+    def test_la_ficha_del_estudiante_muestra_el_panel(self):
+        self.marcar(self.dar_clase(), "asistio")
+        self.client.force_login(self.director.usuario)
+
+        respuesta = self.client.get(reverse("detalle_usuario", args=[self.ana.id]))
+
+        self.assertContains(respuesta, "asis-cal")
+        self.assertContains(respuesta, "Asistencia")
+
+    def test_la_ficha_del_profesor_muestra_el_panel(self):
+        self.dar_clase()
+        self.client.force_login(self.director.usuario)
+
+        respuesta = self.client.get(reverse("detalle_usuario", args=[self.profesor.id]))
+
+        self.assertContains(respuesta, "Clases dictadas")

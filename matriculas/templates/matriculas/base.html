@@ -25,6 +25,11 @@
     --radius-lg: 18px;
     --radius: 12px;
     --radius-sm: 8px;
+    /* Marcas de dato, no controles: una celda de calendario de 11px con el
+       radio de un botón sería casi un círculo, y una rejilla de círculos deja
+       de leerse como calendario. Misma excepción documentada que las barras de
+       estadísticas — ver "Excepción intencional — barras de dato" en DESIGN.md. */
+    --radius-dato: 2px;
     --shadow: 0 1px 2px rgba(24,36,32,0.05), 0 6px 16px rgba(24,36,32,0.08);
     --shadow-lift: 0 4px 10px rgba(24,36,32,0.10), 0 12px 28px rgba(24,36,32,0.12);
     --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -550,6 +555,71 @@
   .panel-item-resumen::-webkit-details-marker { display: none; }
   .panel-item[open] > .panel-item-resumen { padding-bottom: 0.5rem; }
   .panel-item .estado { margin-left: 0.15rem; }
+
+  /* ---- Panel de asistencia de las fichas -------------------------------
+     Cifras de cabecera + calendario del periodo. Las cifras van en fichas y no
+     en una gráfica de barras porque son valores sueltos sin eje común: una
+     barra de "racha 3" al lado de una de "clases 24" compararía cosas que no
+     se comparan. */
+  .asis { margin-top: 2.2rem; }
+  /* Cuatro por fila como tope: más caben, pero una fila de siete fichas se lee
+     como una tira de números sueltos en vez de como grupos. El max-width es lo
+     que fija el tope sin apagar el auto-fit de las pantallas estrechas. */
+  .asis-fichas {
+    display: grid; gap: 0.5rem; margin: 0.9rem 0 1.1rem; max-width: 44rem;
+    grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  }
+  .asis-ficha {
+    background: var(--surface-alt); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 0.6rem 0.75rem;
+    display: flex; flex-direction: column; gap: 0.15rem;
+  }
+  .asis-ficha-etiqueta { font-size: 0.75rem; color: var(--ink-soft); }
+  /* Tabulares: en una fila de cifras que se leen de un vistazo, el ancho
+     variable de los dígitos proporcionales las descuadra entre sí. */
+  .asis-ficha-valor { font-size: 1.35rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .asis-ficha-nota { font-size: 0.7rem; color: var(--ink-faint); }
+
+  /* El calendario desborda a lo ancho en pantallas pequeñas: se desplaza él,
+     nunca la página. */
+  .asis-cal-envoltorio { overflow-x: auto; padding-bottom: 0.3rem; }
+  .asis-cal {
+    display: grid; grid-auto-flow: column;
+    grid-template-rows: repeat(7, 11px); gap: 3px;
+    width: max-content;
+  }
+  .asis-cel {
+    width: 11px; height: 11px; border-radius: var(--radius-dato);
+    background: var(--surface-alt); border: 1px solid var(--border);
+  }
+  /* Estados del estudiante. Los tres tonos están validados como paleta —banda
+     de luminosidad, croma, separación bajo daltonismo y suelo de visión
+     normal—, no elegidos a ojo. */
+  .asis-cel.cal-asistio { background: #1baf7a; border-color: #1baf7a; }
+  .asis-cel.cal-falto   { background: #b22e22; border-color: #b22e22; }
+  /* Excusa: relleno naranja con un hueco al centro. La forma es lo que la
+     separa de una falta para quien no distingue los dos tonos. */
+  .asis-cel.cal-excusa {
+    background: #eb6834; border-color: #eb6834;
+    box-shadow: inset 0 0 0 2px var(--surface);
+  }
+  /* Hubo clase y nadie la pasó: contorno punteado sin relleno, la misma
+     metáfora que el estado "pendiente" del resto del sistema. */
+  .asis-cel.cal-sin_marcar {
+    background: var(--surface); border-style: dotted; border-color: var(--border-strong);
+  }
+  /* Cuántas clases dictó (magnitud): una sola tinta en tres pasos. */
+  .asis-cel.cal-n1 { background: #bcd4f2; border-color: #bcd4f2; }
+  .asis-cel.cal-n2 { background: #6ba3e3; border-color: #6ba3e3; }
+  .asis-cel.cal-n3 { background: #2a78d6; border-color: #2a78d6; }
+
+  .asis-leyenda {
+    list-style: none; padding: 0; margin: 0.7rem 0 0;
+    display: flex; flex-wrap: wrap; gap: 0.4rem 1rem;
+    font-size: 0.78rem; color: var(--ink-soft);
+  }
+  .asis-leyenda li { display: flex; align-items: center; gap: 0.35rem; }
+  .asis-leyenda strong { color: var(--ink); font-variant-numeric: tabular-nums; }
 
   .accion-fila { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
 

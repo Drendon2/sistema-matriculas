@@ -232,7 +232,10 @@ Radios suaves y consistentes: `8px` en controles (botones, inputs, chips de esta
 
 El estado "activa" (`.estado-activa`) lleva un punto (`::before`) del color del estado antes del texto, como la cabeza de un pin — pendiente y retirada no lo llevan.
 
-**Excepción intencional — barras de dato:** las pistas y rellenos de las barras de estadísticas (`.stat-bar-pista`/`.stat-bar-relleno`, `.dash-split`) usan radio = mitad de su propia altura (`5px` sobre `10px`, `7px` sobre `14px`), no la escala `8/12/18px` de tarjetas y controles. Una barra de dato es una pista delgada con extremos en píldora — su propia categoría de forma, igual que el punto del pin no sigue la escala de radios tampoco.
+**Excepción intencional — marcas de dato:** una marca de dato no es un control, y no sigue la escala `8/12/18px` de tarjetas y controles. Son su propia categoría de forma, igual que el punto del pin no sigue la escala de radios tampoco. Hay dos casos, y el token `--radius-dato` (`2px`) cubre el segundo:
+
+- **Barras** (`.stat-bar-pista`/`.stat-bar-relleno`, `.dash-split`): radio = mitad de su propia altura (`5px` sobre `10px`, `7px` sobre `14px`) — una pista delgada con extremos en píldora.
+- **Celdas de calendario** (`.asis-cel`, el panel de asistencia de las fichas): `--radius-dato`. Un cuadro de `11px` con el radio de un botón sería casi un círculo, y una rejilla de círculos deja de leerse como calendario: la esquina apenas insinuada es lo que mantiene la lectura de cuadrícula.
 
 ## Components
 

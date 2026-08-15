@@ -1583,3 +1583,214 @@ def resumen_trayectoria(perfil):
             ).order_by("fecha_inicio").first()
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# Resumen de asistencia (el panel de las fichas)
+# ---------------------------------------------------------------------------
+#
+# Las cifras que alimentan el panel de la ficha de una persona. Viven aquí y no
+# en la vista porque son preguntas sobre el modelo —"cuántas faltó", "cuántas
+# dictó sin que nadie las verificara"— y las hace más de una pantalla.
+#
+# Las dos funciones comparten la forma del resultado a propósito: `fichas` son
+# las cifras de cabecera y `dias` el calendario, de modo que la plantilla del
+# panel sirve para las dos sin preguntar de quién es la ficha.
+
+# El orden en que un día "gana" cuando hay varias clases: lo que se busca al
+# recorrer un calendario de asistencia es dónde están los problemas, así que una
+# falta tapa a una asistencia del mismo día y no al revés.
+PRIORIDAD_DIA = ("falto", "excusa", "sin_marcar", "asistio")
+
+ETIQUETA_DIA = {
+    "asistio": "Asistió",
+    "falto": "Faltó",
+    "excusa": "Faltó con excusa",
+    "sin_marcar": "Hubo clase, sin marcar",
+}
+
+
+def _celdas(dias, periodo, clase, titulo):
+    """Una celda por día del periodo, con su clase CSS y su texto al pasar.
+
+    El título va en TODAS las celdas, incluidas las vacías. La rejilla dice el
+    estado por color y por forma, pero un cuadro de once píxeles no dice qué día
+    es: sin el texto al pasar, el calendario se puede mirar y no se puede leer.
+    """
+    return [
+        {
+            "fecha": dia,
+            "clase": clase(dias[dia]) if dia in dias else "",
+            "titulo": (
+                f"{dia:%d/%m/%Y} — {titulo(dias[dia])}" if dia in dias
+                else f"{dia:%d/%m/%Y} — sin clase"
+            ),
+        }
+        for dia in dias_del_periodo(periodo, dias)
+    ]
+
+
+def dias_del_periodo(periodo, con_datos=()):
+    """Los días a pintar, empezando el lunes de la primera semana.
+
+    Arranca en lunes porque el calendario se pinta en columnas de siete: si
+    empezara el día 1 del periodo, cada fila sería un día de la semana distinto
+    y el patrón semanal —que es justo lo que se va a mirar— dejaría de verse.
+
+    `con_datos` ensancha la ventana hasta cubrir los días que traen algo. Las
+    fechas de las clases no siempre caen dentro de `fecha_inicio`–`fecha_fin`:
+    una clase pertenece al periodo por su columna `periodo`, no por su fecha, y
+    una registrada la semana previa a la apertura sigue siendo de ese periodo.
+    Sin esto el calendario se la comía en silencio y contradecía a la ficha de
+    cifras de al lado, que sí la contaba.
+    """
+    if periodo is None:
+        return []
+    fechas = list(con_datos)
+    primero = min([periodo.fecha_inicio] + fechas)
+    primero -= timedelta(days=primero.weekday())
+    ultimo = max([min(periodo.fecha_fin, date.today())] + fechas)
+    if ultimo < primero:
+        return []
+    return [primero + timedelta(days=n) for n in range((ultimo - primero).days + 1)]
+
+
+def resumen_asistencia_estudiante(perfil, periodo, promotorias=None):
+    """Cómo le ha ido a un estudiante en las clases de un periodo.
+
+    `promotorias` acota a las de quien consulta: un profesor ve la asistencia de
+    las suyas y no la de las demás disciplinas del estudiante. Con None se ve
+    todo, que es lo que corresponde a dirección.
+
+    "Sin marcar" es una categoría propia y no se suma a las faltas. La ausencia
+    de fila significa que hubo clase y a esa persona nadie la pasó (ver
+    `Asistencia`), y eso no es lo mismo que faltar: contarlo como falta le
+    cargaría al estudiante un descuido del profesor.
+    """
+    if periodo is None:
+        return None
+
+    matriculas = Matricula.objects.filter(
+        estudiante=perfil, periodo=periodo, grupo__isnull=False,
+    )
+    if promotorias is not None:
+        matriculas = matriculas.filter(promotoria__in=promotorias)
+    matriculas = list(matriculas.select_related("grupo"))
+    if not matriculas:
+        return None
+
+    marcas = {
+        (a.clase_id, a.matricula_id): a.estado
+        for a in Asistencia.objects.filter(matricula__in=matriculas)
+    }
+    # Una clase le "toca" a una matrícula cuando es del grupo de esa matrícula.
+    # Se recorre así —y no por las asistencias— porque las clases sin marca
+    # tienen que aparecer, y esas no tienen fila que recorrer.
+    clases = (
+        Clase.objects.filter(grupo__in=[m.grupo for m in matriculas], periodo=periodo)
+        .order_by("fecha_hora")
+    )
+    por_grupo = {}
+    for matricula in matriculas:
+        por_grupo.setdefault(matricula.grupo_id, matricula.id)
+
+    cuenta = {"asistio": 0, "falto": 0, "excusa": 0, "sin_marcar": 0}
+    dias, cronologia = {}, []
+    for clase in clases:
+        matricula_id = por_grupo.get(clase.grupo_id)
+        estado = marcas.get((clase.id, matricula_id), "sin_marcar")
+        cuenta[estado] += 1
+        cronologia.append(estado)
+        dia = timezone.localtime(clase.fecha_hora).date()
+        previo = dias.get(dia)
+        if previo is None or PRIORIDAD_DIA.index(estado) < PRIORIDAD_DIA.index(previo):
+            dias[dia] = estado
+
+    marcadas = cuenta["asistio"] + cuenta["falto"] + cuenta["excusa"]
+    # La racha se cuenta hacia atrás desde la última clase y la rompe cualquier
+    # cosa que no sea haber ido — una excusa justifica la falta, no la asistencia.
+    racha = 0
+    for estado in reversed(cronologia):
+        if estado != "asistio":
+            break
+        racha += 1
+
+    return {
+        "tipo": "estudiante",
+        "fichas": [
+            {"etiqueta": "Clases", "valor": len(cronologia)},
+            {"etiqueta": "Asistió", "valor": cuenta["asistio"]},
+            {"etiqueta": "Faltó", "valor": cuenta["falto"]},
+            {"etiqueta": "Con excusa", "valor": cuenta["excusa"]},
+            {"etiqueta": "Sin marcar", "valor": cuenta["sin_marcar"]},
+            {
+                "etiqueta": "Asistencia",
+                "valor": f"{round(cuenta['asistio'] / marcadas * 100)}%" if marcadas else "—",
+                "nota": "de las clases con marca",
+            },
+            {"etiqueta": "Racha", "valor": f"{racha}" if racha else "—",
+             "nota": "seguidas asistiendo"},
+        ],
+        "celdas": _celdas(
+            dias, periodo,
+            clase=lambda estado: f"cal-{estado}",
+            titulo=lambda estado: ETIQUETA_DIA[estado],
+        ),
+        "leyenda": [
+            {"clase": f"cal-{estado}", "etiqueta": ETIQUETA_DIA[estado], "valor": cuenta[estado]}
+            for estado in ("asistio", "excusa", "falto", "sin_marcar")
+        ],
+    }
+
+
+def resumen_asistencia_profesor(perfil, periodo):
+    """Cuánto ha dictado alguien en un periodo, y cuánto se le verificó.
+
+    Va por `registrada_por` y no por las promotorías que tiene asignadas: lo que
+    describe es lo que esa persona hizo, no lo que le corresponde hacer. Un
+    director que cubrió unas clases aparece con ellas aunque la promotoría no
+    sea suya.
+    """
+    if periodo is None:
+        return None
+
+    clases = list(
+        Clase.objects.filter(registrada_por=perfil, periodo=periodo)
+        .prefetch_related("confirmaciones").order_by("fecha_hora")
+    )
+    if not clases:
+        return None
+
+    verificadas = sum(1 for c in clases if c.esta_confirmada(c.confirmaciones.count()))
+    dias = {}
+    for clase in clases:
+        dia = timezone.localtime(clase.fecha_hora).date()
+        dias[dia] = dias.get(dia, 0) + 1
+
+    return {
+        "tipo": "profesor",
+        "fichas": [
+            {"etiqueta": "Clases dictadas", "valor": len(clases)},
+            {"etiqueta": "Verificadas", "valor": verificadas},
+            {"etiqueta": "Sin verificar", "valor": len(clases) - verificadas},
+            {
+                "etiqueta": "Verificación",
+                "valor": f"{round(verificadas / len(clases) * 100)}%",
+                "nota": "confirmadas por sus estudiantes",
+            },
+            {"etiqueta": "Grupos", "valor": len({c.grupo_id for c in clases})},
+            {"etiqueta": "Días con clase", "valor": len(dias)},
+        ],
+        # Magnitud, no identidad: aquí la celda dice CUÁNTAS clases hubo ese día,
+        # así que va una sola tinta en tres pasos y no la paleta de estados del
+        # estudiante. Son dos preguntas distintas y se ven distintas a propósito.
+        "celdas": _celdas(
+            dias, periodo,
+            clase=lambda cuantas: f"cal-n{min(cuantas, 3)}",
+            titulo=lambda cuantas: f"{cuantas} clase{'s' if cuantas != 1 else ''}",
+        ),
+        "leyenda": [
+            {"clase": f"cal-n{n}", "etiqueta": etiqueta, "valor": None}
+            for n, etiqueta in ((1, "1 clase"), (2, "2"), (3, "3 o más"))
+        ],
+    }

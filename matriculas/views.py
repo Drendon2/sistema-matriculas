@@ -25,8 +25,8 @@ from .models import (
     Acudiente, Asistencia, Clase, ConfiguracionInstitucion, ConfirmacionClase,
     CupoPromotoria, DatosEstudiante, EncuestaSatisfaccion, Grupo, Matricula,
     Perfil, Periodo, Promotoria, clases_por_confirmar, historial_por_periodo,
-    limite_promotorias, matriculas_renovables, resumen_asistencia_grupo,
-    resumen_trayectoria,
+    limite_promotorias, matriculas_renovables, resumen_asistencia_estudiante,
+    resumen_asistencia_grupo, resumen_asistencia_profesor, resumen_trayectoria,
 )
 
 # Quién entra al Panel: el personal, es decir todos los roles menos estudiante.
@@ -1416,10 +1416,24 @@ def detalle_usuario(request, perfil_id):
 
     datos_estudiante = getattr(objetivo, "datos_estudiante", None) if es_estudiante else None
 
+    # El panel de asistencia sigue la misma matriz que el resto de la ficha: un
+    # profesor ve lo de SUS promotorías y no la asistencia del estudiante en
+    # otras disciplinas. Dirección lo ve completo (`acotar_a` en None).
+    periodo = Periodo.en_curso()
+    if es_estudiante:
+        acotar_a = None
+        if perfil.rol == "profesor":
+            acotar_a = Promotoria.objects.filter(profesor=perfil)
+        asistencia = resumen_asistencia_estudiante(objetivo, periodo, acotar_a)
+    else:
+        asistencia = resumen_asistencia_profesor(objetivo, periodo)
+
     return render(request, "matriculas/detalle_usuario.html", {
         "objetivo": objetivo,
         "es_estudiante": es_estudiante,
         "ve_contacto": ve_contacto,
+        "asistencia": asistencia,
+        "periodo": periodo,
         "acudiente": datos_estudiante.acudiente if datos_estudiante and ve_contacto else None,
         "resumen": resumen_trayectoria(objetivo) if es_estudiante else None,
         # Las promotorías salen del VÍNCULO y no del rol: un director que
