@@ -77,6 +77,19 @@ python manage.py runserver
 
 Abre `http://127.0.0.1:8000/` en el navegador. Inicia sesión con la cuenta creada en el paso 4 y ve a **Gestión** para empezar a cargar departamentos, promotorías y periodos.
 
+## Datos de prueba
+
+Para probar el sistema con volumen real hay un sembrador:
+
+```bash
+python manage.py simular              # ~100 usuarios de los cuatro roles
+python manage.py simular --limpiar    # borra todo lo que sembró
+```
+
+No son cien filas aleatorias: siembra a propósito los casos que el sistema tiene que saber manejar —promotoría sin profesor, promotoría sin grupos, matrículas en los cuatro estados, menores con acudiente, encuestas completas / a medias / sin empezar, clases verificadas, una vencida sin verificar y una a medias con el plazo abierto, más historial y deserción del periodo anterior— y al terminar imprime dónde está cada uno y con qué cuenta entrar (la contraseña de todas es `simulacion`).
+
+Todo queda marcado: las cuentas con el usuario `sim.…` y el catálogo con el sufijo ` (sim)`, así que `--limpiar` lo borra entero sin tocar tus datos. Usa el periodo que ya esté en curso en vez de crear uno, y se niega a correr con `DEBUG=False`.
+
 ## Estado del proyecto
 
 En desarrollo activo. Proyecto privado.

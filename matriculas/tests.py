@@ -14,9 +14,12 @@ y `PantallaConfiguracionTests`.
 import math
 import re
 from datetime import date, timedelta
+from io import StringIO
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.template.loader import render_to_string
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
@@ -2536,3 +2539,124 @@ class DirectorQueDictaTests(TestCase):
         ]
 
         self.assertNotIn("Promotorías a cargo", etiquetas)
+
+
+class ComandoSimularTests(TestCase):
+    """El sembrador de datos de prueba (`manage.py simular`).
+
+    No se prueba el reparto —es azar con semilla, y fijar cada cifra volvería
+    la prueba una copia del código—, sino lo que tiene que seguir siendo cierto
+    pase lo que pase: que corra contra los modelos de hoy, que los escenarios
+    que promete existan de verdad, y sobre todo que `--limpiar` devuelva la base
+    a como estaba. Un sembrador que no sabe borrarse es una herramienta que
+    ensucia la base de alguien.
+    """
+
+    def setUp(self):
+        self.periodo = Periodo.objects.create(
+            nombre="2026-2", fecha_inicio=date(2026, 7, 1), fecha_fin=date(2026, 12, 15),
+            activo=True, matriculas_abiertas=True,
+        )
+        Periodo.objects.create(
+            nombre="2026-1", fecha_inicio=date(2026, 1, 15), fecha_fin=date(2026, 6, 15),
+        )
+
+    def simular(self, **opciones):
+        # `forzar` porque el runner de Django corre con DEBUG=False y el comando
+        # se niega a sembrar en algo que parezca un entorno real. Ese guardia
+        # tiene su propia prueba abajo.
+        opciones.setdefault("forzar", True)
+        call_command("simular", stdout=StringIO(), **opciones)
+
+    def test_no_siembra_en_algo_que_parece_un_entorno_real(self):
+        """El runner corre con DEBUG=False, así que aquí el guardia se prueba solo."""
+        with self.assertRaises(CommandError):
+            call_command("simular", estudiantes=5, stdout=StringIO())
+
+        self.assertFalse(User.objects.filter(username__startswith="sim.").exists())
+
+    def test_siembra_y_se_borra_sin_dejar_rastro(self):
+        antes = (User.objects.count(), Promotoria.objects.count(), Area.objects.count())
+
+        self.simular(estudiantes=12)
+        sembrado = User.objects.count()
+        self.simular(limpiar=True)
+
+        self.assertGreater(sembrado, antes[0])
+        self.assertEqual(
+            (User.objects.count(), Promotoria.objects.count(), Area.objects.count()), antes
+        )
+        # Lo que cuelga de las cuentas se va con ellas; lo que no (acudientes,
+        # que son SET_NULL) hay que barrerlo aparte, y es lo que más fácil se
+        # queda olvidado.
+        self.assertFalse(Acudiente.objects.exists())
+        self.assertFalse(Matricula.objects.exists())
+        self.assertFalse(Clase.objects.exists())
+
+    def test_no_toca_el_periodo_en_curso(self):
+        """Crear y activar uno propio rompería 'un solo periodo activo'."""
+        self.simular(estudiantes=6)
+
+        self.assertEqual(Periodo.en_curso(), self.periodo)
+        self.assertEqual(Periodo.objects.count(), 2)
+
+    def test_deja_puestos_los_escenarios_que_promete(self):
+        self.simular(estudiantes=40)
+
+        roles = set(
+            Perfil.objects.filter(usuario__username__startswith="sim.")
+            .values_list("rol", flat=True)
+        )
+        estados = set(Matricula.objects.values_list("estado", flat=True))
+        clases = list(Clase.objects.all())
+
+        self.assertEqual(roles, {"administrador", "director", "profesor", "estudiante", ""})
+        self.assertEqual(estados, {e for e, _ in Matricula.ESTADOS})
+        # Una promotoría sin profesor y otra sin grupos: los dos huecos que el
+        # personal se encuentra al empezar.
+        self.assertTrue(Promotoria.objects.filter(profesor__isnull=True).exists())
+        self.assertTrue(Promotoria.objects.filter(grupos__isnull=True).exists())
+        # Y los tres desenlaces de una verificación.
+        self.assertTrue(any(c.esta_confirmada() for c in clases))
+        self.assertTrue(any(c.verificacion_vencida() for c in clases))
+        self.assertTrue(any(
+            c.confirmacion_abierta() and not c.esta_confirmada() for c in clases
+        ))
+
+    def test_los_menores_quedan_con_acudiente(self):
+        """Sin acudiente, `DatosEstudiante` no valida: sembrarlos así dejaría
+        filas que la propia aplicación no habría dejado crear."""
+        self.simular(estudiantes=30)
+
+        menores = [
+            d for d in DatosEstudiante.objects.select_related("perfil")
+            if d.perfil.es_menor
+        ]
+
+        self.assertTrue(menores)
+        for datos in menores:
+            self.assertIsNotNone(datos.acudiente, f"{datos.perfil} es menor y no tiene acudiente")
+
+    def test_la_misma_semilla_da_el_mismo_reparto(self):
+        self.simular(estudiantes=10, semilla=7)
+        primero = list(
+            Perfil.objects.filter(usuario__username__startswith="sim.")
+            .order_by("usuario__username").values_list("nombre_completo", flat=True)
+        )
+        self.simular(limpiar=True)
+
+        self.simular(estudiantes=10, semilla=7)
+        segundo = list(
+            Perfil.objects.filter(usuario__username__startswith="sim.")
+            .order_by("usuario__username").values_list("nombre_completo", flat=True)
+        )
+
+        self.assertEqual(primero, segundo)
+
+    def test_sin_periodo_en_curso_no_siembra_nada(self):
+        Periodo.objects.update(activo=False)
+
+        with self.assertRaises(CommandError):
+            self.simular(estudiantes=5)
+
+        self.assertFalse(User.objects.filter(username__startswith="sim.").exists())
