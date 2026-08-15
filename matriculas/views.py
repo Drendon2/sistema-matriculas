@@ -29,7 +29,10 @@ from .models import (
     resumen_trayectoria,
 )
 
-ROLES_PANEL = ("profesor", "director", "administrador")
+# Quién entra al Panel: el personal, es decir todos los roles menos estudiante.
+# Sale del modelo para que esta lista y la de quién puede quedar a cargo de una
+# promotoría (`Promotoria.profesor`) no se separen con el tiempo.
+ROLES_PANEL = Perfil.ROLES_PERSONAL
 
 
 def requiere_rol(*roles):
@@ -737,7 +740,7 @@ def _puede_gestionar_promotoria(perfil, promotoria):
 
 
 def _dicta_la_promotoria(perfil, promotoria):
-    """¿Es esta persona EL profesor de la promotoría?
+    """¿Es esta persona quien dicta la promotoría?
 
     Es una regla más estrecha que `_puede_gestionar_promotoria`, y la diferencia
     está donde tiene que estar: gestionar el catálogo —crear grupos, fijar
@@ -745,15 +748,29 @@ def _dicta_la_promotoria(perfil, promotoria):
     y pasar lista son actos de quien estuvo en el salón.
 
     Director y administrador siguen VIENDO todo lo de asistencia; lo que no
-    hacen es escribirlo. Un registro que puede reescribir alguien que no dio la
-    clase deja de ser evidencia de lo que pasó, y es justamente la evidencia lo
-    que la confirmación de los estudiantes está sosteniendo.
+    hacen es escribirla en promotorías ajenas. Un registro que puede reescribir
+    alguien que no dio la clase deja de ser evidencia de lo que pasó, y es
+    justamente la evidencia lo que la confirmación de los estudiantes está
+    sosteniendo.
 
-    Consecuencia asumida: una promotoría SIN profesor asignado no puede
-    registrar clases hasta que se le asigne uno. Es correcto — sin profesor no
-    hay quien dé la clase — y el mensaje de error lo dice.
+    Lo que se mira es el VÍNCULO (`Promotoria.profesor`), no el rol. Un director
+    que además dicta su propia promotoría es un caso real, y exigiéndole el rol
+    "profesor" quedaba en el peor sitio posible: veía su propio grupo en solo
+    lectura, sin poder registrar su asistencia y sin que nadie pudiera hacerlo
+    por él. `Perfil.rol` es un solo valor, así que la única salida habría sido
+    dejar de ser director.
+
+    Contrapartida asumida: quien edita el catálogo puede asignarse a sí mismo
+    una promotoría y con eso escribir su asistencia. No es un agujero silencioso
+    —el panel enseña quién es el profesor de cada promotoría, así que el cambio
+    queda a la vista— y la clase la siguen verificando los estudiantes, que es
+    donde vive la garantía de verdad.
+
+    Consecuencia asumida: una promotoría SIN nadie asignado no puede registrar
+    clases hasta que se le asigne alguien. Es correcto —sin profesor no hay
+    quien dé la clase— y el mensaje de error lo dice.
     """
-    return perfil.rol == "profesor" and promotoria.profesor_id == perfil.id
+    return promotoria.profesor_id is not None and promotoria.profesor_id == perfil.id
 
 
 def _ficha_estudiante(matricula):
@@ -1067,8 +1084,8 @@ def panel_asignar_grupo(request, matricula_id):
 # ---------------------------------------------------------------------------
 
 _SOLO_EL_PROFESOR = (
-    "Solo el profesor que dicta la promotoría puede registrar clases y pasar lista. "
-    "Si la promotoría no tiene profesor asignado, asígnale uno primero."
+    "Registrar clases y pasar lista es de quien dicta la promotoría. Si no tiene a "
+    "nadie asignado —o si eres tú quien la dicta—, asígnala en Gestión → Promotorías."
 )
 
 # Cómo se pinta una marca de asistencia cuando NO se puede editar (director o
@@ -1331,12 +1348,14 @@ def detalle_usuario(request, perfil_id):
         "ve_contacto": ve_contacto,
         "acudiente": datos_estudiante.acudiente if datos_estudiante and ve_contacto else None,
         "resumen": resumen_trayectoria(objetivo) if es_estudiante else None,
-        # Un profesor "tiene" promotorías; el resto de roles no cuelga del
-        # catálogo, así que para ellos esta lista queda vacía a propósito.
+        # Las promotorías salen del VÍNCULO y no del rol: un director que
+        # además dicta tiene que ver las suyas en su ficha, y antes no salían
+        # porque la condición miraba `rol == "profesor"`. Para quien no dicta
+        # nada la lista queda vacía sola, sin necesidad de preguntarle el rol.
         "promotorias": (
+            [] if es_estudiante else
             Promotoria.objects.filter(profesor=objetivo)
             .select_related("area").prefetch_related("grupos").order_by("area__nombre", "nombre")
-            if objetivo.rol == "profesor" else []
         ),
         "puede_gestionar_usuarios": perfil.rol in ("director", "administrador"),
     })
@@ -1480,10 +1499,18 @@ def _estadisticas_mi_perfil(perfil):
             {"numero": Grupo.objects.filter(promotoria__profesor=perfil).count(), "etiqueta": "Grupos"},
         ]
     if perfil.rol in ("director", "administrador"):
-        return [
+        cifras = [
             {"numero": Promotoria.objects.count(), "etiqueta": "Promotorías"},
             {"numero": Perfil.objects.count(), "etiqueta": "Usuarios"},
         ]
+        # Un director puede además dictar (ver `Promotoria.profesor`). Cuando lo
+        # hace, sus dos cifras de dirección no cuentan lo suyo por ninguna
+        # parte: se le suma la que sí, y solo entonces — a quien no dicta no se
+        # le enseña un cero que no significa nada.
+        a_cargo = Promotoria.objects.filter(profesor=perfil).count()
+        if a_cargo:
+            cifras.append({"numero": a_cargo, "etiqueta": "Promotorías a cargo"})
+        return cifras
     return []
 
 

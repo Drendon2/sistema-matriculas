@@ -95,7 +95,10 @@
 </p>
 {% endif %}
 
-{% if objetivo.rol == "profesor" %}
+{# Sale del vínculo, no del rol: un director que además dicta tiene las suyas.
+   Al profesor se le enseña la sección aunque esté vacía, porque ahí el hueco es
+   el dato — a nadie más le dice nada. #}
+{% if objetivo.rol == "profesor" or promotorias %}
 <h3>Promotorías a cargo</h3>
 {% if not promotorias %}
   <p class="vacio">No tiene promotorías asignadas.</p>

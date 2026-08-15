@@ -349,6 +349,12 @@ class Perfil(models.Model):
         ("estudiante", "Estudiante"),
     ]
 
+    # El personal de la institución: todos los roles menos "estudiante". Es
+    # quien puede quedar a cargo de una promotoría —un director que también
+    # dicta es un caso real— y quien entra al Panel (ver views.ROLES_PANEL, que
+    # sale de aquí para que las dos listas no se separen).
+    ROLES_PERSONAL = ("administrador", "director", "profesor")
+
     usuario = models.OneToOneField(User, on_delete=models.CASCADE, related_name="perfil")
     rol = models.CharField(
         max_length=15, choices=ROLES, blank=True,
@@ -657,13 +663,23 @@ class DatosEstudiante(models.Model):
 # ---------------------------------------------------------------------------
 
 class Promotoria(models.Model):
-    """Una promotoría (ej. Violín). La dicta un solo profesor (puede quedar sin asignar)."""
+    """Una promotoría (ej. Violín). La dicta una sola persona (puede quedar sin asignar).
+
+    Quien la dicta no tiene por qué tener el rol "profesor": un director de
+    escuela que además da su propia promotoría es un caso real, y con el rol
+    como único criterio no podía ni quedar asignado aquí ni pasar lista en su
+    propio grupo. Lo que manda es este vínculo, no el rol — ver
+    `views._dicta_la_promotoria`.
+
+    Los estudiantes sí quedan fuera: `ROLES_PERSONAL` es el filtro.
+    """
     nombre = models.CharField(max_length=60)
     area = models.ForeignKey(Area, on_delete=models.PROTECT, related_name="promotorias")
     profesor = models.ForeignKey(
         Perfil, on_delete=models.PROTECT, related_name="promotorias_dictadas",
-        limit_choices_to={"rol": "profesor"},
+        limit_choices_to={"rol__in": Perfil.ROLES_PERSONAL},
         null=True, blank=True,
+        help_text="Quien la dicta y pasa lista en sus grupos. Puede ser un director que también enseña.",
     )
 
     class Meta:

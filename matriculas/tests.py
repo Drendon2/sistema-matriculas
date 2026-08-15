@@ -2381,3 +2381,158 @@ class AsistenciaSoloDelProfesorTests(TestCase):
         self.assertNotIn(boton, del_director)
         # El enlace a las clases lo conservan los dos: leer no es escribir.
         self.assertIn(reverse("grupo_clases", args=[self.grupo.id]), del_director)
+
+
+class DirectorQueDictaTests(TestCase):
+    """Un director de escuela que además dicta su propia promotoría.
+
+    `Perfil.rol` es un solo valor, así que esta persona no puede ser "director y
+    profesor" a la vez. Lo que decide quién pasa lista no es el rol sino el
+    VÍNCULO (`Promotoria.profesor`): con el rol como criterio, el director que
+    dicta quedaba en el peor sitio posible —veía su propio grupo en solo
+    lectura, sin poder registrar la asistencia y sin que nadie pudiera hacerlo
+    por él— y la única salida era dejar de ser director.
+    """
+
+    def setUp(self):
+        self.periodo = Periodo.objects.create(
+            nombre="2026-1", fecha_inicio=date(2026, 1, 15), fecha_fin=date(2026, 6, 15),
+            activo=True, matriculas_abiertas=True,
+        )
+        self.area = Area.objects.create(nombre="Música")
+        self.director = self.crear_perfil("dire", "Directora que enseña", "director")
+        self.profesor = self.crear_perfil("profe", "Profe Díaz", "profesor")
+
+        # La promotoría del director: la dicta él mismo.
+        self.coro = Promotoria.objects.create(
+            nombre="Coro", area=self.area, profesor=self.director,
+        )
+        self.grupo_coro = Grupo.objects.create(
+            promotoria=self.coro, nivel="basico", horario="Lunes 4pm",
+            salon="A1", cupo_maximo=10,
+        )
+        # Y una ajena, del otro profesor.
+        self.violin = Promotoria.objects.create(
+            nombre="Violín", area=self.area, profesor=self.profesor,
+        )
+        self.grupo_violin = Grupo.objects.create(
+            promotoria=self.violin, nivel="basico", horario="Martes 4pm",
+            salon="B2", cupo_maximo=10,
+        )
+
+        self.estudiante = self.crear_perfil("ana", "Ana Ruiz", "estudiante")
+        DatosEstudiante.objects.create(perfil=self.estudiante, documento_identidad="123")
+        self.matricula = self.matricular(self.estudiante, self.coro, self.grupo_coro)
+
+    def crear_perfil(self, username, nombre, rol):
+        usuario = User.objects.create_user(username=username, password="x")
+        return Perfil.objects.create(
+            usuario=usuario, rol=rol, nombre_completo=nombre,
+            fecha_nacimiento=date(1990, 1, 1), telefono="3000000000",
+        )
+
+    def matricular(self, perfil, promotoria, grupo):
+        matricula = Matricula(
+            estudiante=perfil, promotoria=promotoria, periodo=self.periodo,
+            estado="activa", grupo=grupo,
+        )
+        matricula.full_clean()
+        matricula.save()
+        return matricula
+
+    # -- en SU promotoría manda -------------------------------------------
+
+    def test_el_director_que_dicta_puede_registrar_su_clase(self):
+        self.client.force_login(self.director.usuario)
+
+        self.client.post(reverse("panel_clase_nueva", args=[self.grupo_coro.id]))
+
+        clase = Clase.objects.get()
+        self.assertEqual(clase.grupo, self.grupo_coro)
+        self.assertEqual(clase.registrada_por, self.director)
+
+    def test_el_director_que_dicta_puede_pasar_lista_en_su_grupo(self):
+        self.client.force_login(self.director.usuario)
+        self.client.post(reverse("panel_clase_nueva", args=[self.grupo_coro.id]))
+        clase = Clase.objects.get()
+
+        self.client.post(
+            reverse("clase_asistencia", args=[clase.id]),
+            {f"estado_{self.matricula.id}": "asistio"},
+        )
+
+        self.assertEqual(clase.asistencias.get().estado, "asistio")
+
+    # -- en la ajena, no ---------------------------------------------------
+
+    def test_en_la_promotoria_de_otro_sigue_sin_poder(self):
+        """Ser director no le da la asistencia de un grupo que no dio."""
+        self.client.force_login(self.director.usuario)
+
+        self.client.post(reverse("panel_clase_nueva", args=[self.grupo_violin.id]))
+
+        self.assertFalse(Clase.objects.exists())
+
+    def test_en_la_ajena_la_ve_pero_no_la_escribe(self):
+        self.client.force_login(self.profesor.usuario)
+        self.client.post(reverse("panel_clase_nueva", args=[self.grupo_violin.id]))
+        clase = Clase.objects.get()
+
+        self.client.force_login(self.director.usuario)
+        respuesta = self.client.get(reverse("clase_asistencia", args=[clase.id]))
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertFalse(respuesta.context["puede_marcar"])
+
+    # -- poder quedar asignado --------------------------------------------
+
+    def test_el_desplegable_ofrece_al_personal_y_no_a_los_estudiantes(self):
+        """Antes solo salían los de rol "profesor", así que ni se podía asignar."""
+        from django import forms as django_forms
+
+        formulario = django_forms.modelform_factory(
+            Promotoria, fields=["nombre", "area", "profesor"]
+        )()
+        ofrecidos = formulario.fields["profesor"].queryset
+
+        self.assertIn(self.director, ofrecidos)
+        self.assertIn(self.profesor, ofrecidos)
+        self.assertNotIn(self.estudiante, ofrecidos)
+
+    # -- los dos síntomas del mismo problema -------------------------------
+
+    def test_su_ficha_lista_las_promotorias_que_dicta(self):
+        """Salían del rol y no del vínculo, así que la ficha de un director iba vacía.
+
+        Se comprueba sobre el HTML y no solo sobre el contexto: la sección venía
+        además envuelta en `{% if objetivo.rol == "profesor" %}`, así que pasarle
+        la lista a la plantilla no bastaba para que se viera.
+        """
+        self.client.force_login(self.director.usuario)
+
+        respuesta = self.client.get(reverse("detalle_usuario", args=[self.director.id]))
+
+        self.assertEqual([p.nombre for p in respuesta.context["promotorias"]], ["Coro"])
+        self.assertContains(respuesta, "Promotorías a cargo")
+        self.assertContains(respuesta, "Coro")
+
+    def test_mi_perfil_le_cuenta_lo_que_dicta_ademas_de_lo_de_direccion(self):
+        self.client.force_login(self.director.usuario)
+
+        etiquetas = {
+            c["etiqueta"]: c["numero"]
+            for c in self.client.get(reverse("mi_perfil")).context["estadisticas"]
+        }
+
+        self.assertEqual(etiquetas["Promotorías a cargo"], 1)
+        self.assertIn("Usuarios", etiquetas)
+
+    def test_al_director_que_no_dicta_no_se_le_enseña_un_cero(self):
+        otro = self.crear_perfil("dire2", "Director de escritorio", "director")
+        self.client.force_login(otro.usuario)
+
+        etiquetas = [
+            c["etiqueta"] for c in self.client.get(reverse("mi_perfil")).context["estadisticas"]
+        ]
+
+        self.assertNotIn("Promotorías a cargo", etiquetas)
