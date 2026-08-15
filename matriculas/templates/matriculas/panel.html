@@ -10,7 +10,11 @@
   <p class="vacio">No hay promotorías para mostrar todavía.</p>
 {% else %}
   {% for item in datos %}
-  <details class="panel-item">
+  {% comment %}
+  El id no es decorativo: es lo que permite que la promotoría siga abierta
+  después de confirmar una matrícula. Ver `acciones-sin-recarga` en base.html.
+  {% endcomment %}
+  <details class="panel-item" id="promotoria-{{ item.promotoria.id }}">
     <summary class="panel-item-resumen">
       <span class="tag-dot {{ item.promotoria.area|tag_color }}"></span>{{ item.promotoria.nombre }}
       <span style="color:var(--ink-faint);font-weight:400;">({{ item.promotoria.area }})</span>

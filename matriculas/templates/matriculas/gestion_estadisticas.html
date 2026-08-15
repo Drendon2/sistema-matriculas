@@ -60,7 +60,7 @@
   gente: acortar la página no puede costar esconder justo la fila que hay que
   mirar. Es `<details>` nativo, sin JavaScript, como la encuesta de más abajo.
   {% endcomment %}
-  <details class="dash-departamento"{% if d.pct_desercion >= 50 %} open{% endif %}>
+  <details class="dash-departamento" id="dep-{{ d.id }}"{% if d.pct_desercion >= 50 %} open{% endif %}>
     <summary class="stat-bar-fila dep-cabecera">
       <svg class="dep-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
       <span class="stat-bar-etiqueta"><span class="tag-dot {{ d.tag_class }}"></span>{{ d.nombre }}</span>
@@ -113,7 +113,7 @@
   </div>
 </div>
 
-<details class="perfil-seccion" style="max-width: none; margin-top: 2.6rem;">
+<details class="perfil-seccion" id="bloque-encuesta" style="max-width: none; margin-top: 2.6rem;">
   <summary class="perfil-seccion-cabecera">
     <span class="perfil-seccion-icono icono-encuesta" aria-hidden="true">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

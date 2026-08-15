@@ -271,8 +271,15 @@
 
   .cupos-agotados { color: var(--danger); font-weight: 700; }
 
-  .messages { list-style: none; padding: 0; margin: 0 0 1.3rem; }
-  .messages li { padding: 0.7rem 1rem; border-radius: var(--radius-sm); margin-bottom: 0.5rem; font-size: 0.85rem; border: 1px solid transparent; }
+  /* Pegajoso, no fijo: ocupa su sitio en el flujo como siempre, pero si la
+     acción se resolvió a mitad de una lista larga el aviso sigue a la vista en
+     lugar de contestar a tres pantallas de distancia. Sin recarga de página,
+     un mensaje que solo vive arriba del todo no lo lee nadie. */
+  .messages {
+    list-style: none; padding: 0; margin: 0 0 1.3rem;
+    position: sticky; top: 0.6rem; z-index: 5;
+  }
+  .messages li { padding: 0.7rem 1rem; border-radius: var(--radius-sm); margin-bottom: 0.5rem; font-size: 0.85rem; border: 1px solid transparent; box-shadow: var(--shadow); }
   .messages .success { background: var(--accent-soft); color: var(--accent-dark); border-color: rgba(10,122,89,0.2); }
   .messages .error { background: var(--danger-bg); color: var(--danger); border-color: rgba(178,46,34,0.2); }
 
@@ -545,6 +552,7 @@
   .panel-item .estado { margin-left: 0.15rem; }
 
   .accion-fila { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
+
   .grupo-cabecera { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
   .grupo-cabecera .acciones { font-size: 0.8rem; display: flex; gap: 0.6rem; }
 
@@ -1011,5 +1019,133 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
   {% endif %}
   {% block content %}{% endblock %}
 </main>
+
+{% comment %}
+ACCIONES SIN RECARGA
+====================
+Este sistema se usa de a tandas: se confirman quince matrículas seguidas, se
+reparten treinta estudiantes en grupos, se vacía la bandeja de cancelaciones.
+Con una recarga entera por acción, cada clic devolvía al usuario al principio
+de la página y había que volver a bajar hasta donde iba. Con listas largas eso
+no es una molestia, es lo que hace el trabajo inviable.
+
+La estrategia NO es convertir cada vista en una API. Las vistas siguen
+haciendo exactamente lo que hacían —guardar, encolar su mensaje y redirigir—,
+y aquí se intercepta el envío para pedir esa misma respuesta por `fetch` y
+cambiar solo lo de dentro de <main>. El servidor sigue siendo la única fuente
+de verdad y sigue re-renderizando de cero: por eso los estudiantes que cambian
+de sección, los contadores de cupo y los avisos salen bien sin que nadie tenga
+que reproducir esa lógica en JavaScript.
+
+Lo que se conserva a mano es lo que el navegador perdería: la posición del
+scroll y qué <details> estaban abiertos.
+
+Si no hay JavaScript, o si `fetch` falla, no pasa nada: el formulario se envía
+como siempre. Ninguna plantilla tuvo que cambiar para entrar aquí; para que
+una acción quede FUERA basta ponerle `data-recarga-completa` al <form>.
+{% endcomment %}
+<script>
+  (function () {
+    var main = document.querySelector("main");
+    if (!main || !window.fetch || !window.DOMParser || !window.history.pushState) { return; }
+
+    function abiertos() {
+      // Solo los que tienen id: el id es la promesa de que ese <details> es el
+      // mismo antes y después. Sin él, la promotoría que cambió de posición
+      // heredaría el estado de la vecina.
+      var estado = {};
+      main.querySelectorAll("details[id]").forEach(function (d) { estado[d.id] = d.open; });
+      return estado;
+    }
+
+    function pintar(html, estado, scroll) {
+      var doc = new DOMParser().parseFromString(html, "text/html");
+      var nuevo = doc.querySelector("main");
+      if (!nuevo) { return false; }
+
+      main.innerHTML = nuevo.innerHTML;
+      if (doc.title) { document.title = doc.title; }
+
+      main.querySelectorAll("details[id]").forEach(function (d) {
+        if (d.id in estado) { d.open = estado[d.id]; }
+      });
+
+      // innerHTML no ejecuta <script>. Las pantallas que traen el suyo (pasar
+      // lista, la encuesta del perfil) quedarían muertas tras un cambio, así
+      // que se reponen creándolos de nuevo.
+      main.querySelectorAll("script").forEach(function (viejo) {
+        var script = document.createElement("script");
+        script.textContent = viejo.textContent;
+        viejo.parentNode.replaceChild(script, viejo);
+      });
+
+      window.scrollTo(0, scroll);
+      return true;
+    }
+
+    document.addEventListener("submit", function (evento) {
+      var form = evento.target;
+      if (!form.matches("form") || !main.contains(form)) { return; }
+      if ((form.method || "").toLowerCase() !== "post") { return; }
+      if (form.hasAttribute("data-recarga-completa")) { return; }
+
+      evento.preventDefault();
+
+      // El botón pulsado importa: hay formularios con más de uno y su
+      // name/value viaja en el envío. FormData(form, submitter) lo hace solo
+      // donde existe; donde no, se añade a mano.
+      var enviador = evento.submitter;
+      var datos;
+      try {
+        datos = new FormData(form, enviador);
+      } catch (e) {
+        datos = new FormData(form);
+        if (enviador && enviador.name) { datos.append(enviador.name, enviador.value); }
+      }
+
+      var estado = abiertos();
+      var scroll = window.scrollY;
+      var destino = form.action || window.location.href;
+      main.setAttribute("aria-busy", "true");
+
+      fetch(destino, {
+        method: "POST",
+        body: datos,
+        credentials: "same-origin",
+        redirect: "follow",
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+      }).then(function (respuesta) {
+        return respuesta.text().then(function (html) {
+          return { html: html, url: respuesta.url, ok: respuesta.ok };
+        });
+      }).then(function (r) {
+        // La acción pudo llevar a OTRA página (crear algo y volver a su lista,
+        // o caerse la sesión y aterrizar en el login). La respuesta que ya
+        // tenemos es la buena: si se navegara de verdad, el mensaje encolado
+        // ya se habría consumido en esta petición y se perdería. Así que se
+        // pinta igual y se corrige la barra de direcciones.
+        var cambioDePagina = r.url && r.url !== window.location.href;
+        if (!pintar(r.html, estado, cambioDePagina ? 0 : scroll)) {
+          window.location.href = r.url || window.location.href;
+          return;
+        }
+        if (cambioDePagina) { window.history.pushState({ pintado: true }, "", r.url); }
+      }).catch(function () {
+        // Red caída o respuesta ilegible. Reenviar por las bravas duplicaría
+        // la acción si el POST sí había llegado, así que se recarga: la página
+        // vuelve a contar el estado real y el usuario ve si se guardó o no.
+        window.location.reload();
+      }).then(function () {
+        main.removeAttribute("aria-busy");
+      });
+    });
+
+    // Atrás/adelante entre entradas que comparten este documento (las que
+    // pusimos con pushState). El navegador cambia la URL pero no vuelve a
+    // cargar nada, y el <main> que se ve es el que dejamos pintado: hay que
+    // pedir la página de verdad.
+    window.addEventListener("popstate", function () { window.location.reload(); });
+  })();
+</script>
 </body>
 </html>

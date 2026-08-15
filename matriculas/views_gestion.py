@@ -636,6 +636,9 @@ def estadisticas(request):
         promotoria_id = fila["promotoria_id"]
         if area_id not in departamentos:
             departamentos[area_id] = {
+                # Para el id del <details>: es lo que lo deja abierto cuando la
+                # página se vuelve a pintar sin recargar (ver base.html).
+                "id": area_id,
                 "nombre": fila["promotoria__area__nombre"],
                 "tag_class": f"tag-{area_id % 8}",
                 "total": 0, "retirados": 0,

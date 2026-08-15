@@ -109,7 +109,7 @@ encuesta a medias no se distingue de una terminada, y quien la dejó así no
 tiene por qué sospechar que le falta nada: son encuestas que el sistema dio por
 buenas en su momento y que la migración 0016 dejó incompletas.
 {% endcomment %}
-<details class="perfil-seccion"{% if faltan_preguntas %} open{% endif %}>
+<details class="perfil-seccion" id="bloque-encuesta"{% if faltan_preguntas %} open{% endif %}>
   <summary class="perfil-seccion-cabecera">
     <span class="perfil-seccion-icono icono-encuesta" aria-hidden="true">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

@@ -819,10 +819,11 @@ class CancelacionTests(TestCase):
         self.client.force_login(perfil.usuario)
         return self.client.post(reverse("retirar_matricula", args=[matricula.id]))
 
-    def resolver(self, matricula, decision):
+    def resolver(self, matricula, decision, con_js=False):
         self.client.force_login(self.director.usuario)
         return self.client.post(
-            reverse("gestion_resolver_cancelacion", args=[matricula.id, decision])
+            reverse("gestion_resolver_cancelacion", args=[matricula.id, decision]),
+            headers={"x-requested-with": "XMLHttpRequest"} if con_js else {},
         )
 
     # -- pedirla ------------------------------------------------------------
@@ -907,6 +908,54 @@ class CancelacionTests(TestCase):
         respuesta = self.client.get(reverse("gestion_cancelaciones"))
 
         self.assertNotEqual(respuesta.status_code, 200)
+
+    # -- la vista no sabe quién la llama ------------------------------------
+    #
+    # Que la pantalla no parpadee es cosa de `acciones-sin-recarga` (base.html),
+    # que intercepta el envío y repinta solo el <main>. La vista sigue
+    # contestando su redirección de siempre, y eso es justo lo que hay que
+    # sostener: si algún día se vuelve a partir en dos caminos, esto falla.
+
+    def test_resolver_redirige_a_la_bandeja_con_su_mensaje(self):
+        matricula = self.matricular(self.adulta)
+        self.pedir_cancelacion(self.adulta, matricula)
+
+        respuesta = self.resolver(matricula, "aprobar")
+
+        self.assertRedirects(respuesta, reverse("gestion_cancelaciones"))
+        avisos = [str(m) for m in get_messages(respuesta.wsgi_request)]
+        self.assertTrue(any("Ana Ruiz" in a for a in avisos), avisos)
+        matricula.refresh_from_db()
+        self.assertEqual(matricula.estado, "retirada")
+
+    def test_contesta_igual_venga_o_no_de_fetch(self):
+        """La cabecera de fetch no cambia la respuesta: si cambiara, habría dos
+        comportamientos que mantener y solo uno se estaría probando."""
+        una = self.matricular(self.adulta)
+        self.pedir_cancelacion(self.adulta, una)
+        otra = self.matricular(self.menor)
+        self.pedir_cancelacion(self.menor, otra)
+
+        sin_js = self.resolver(una, "aprobar")
+        con_js = self.resolver(otra, "aprobar", con_js=True)
+
+        self.assertEqual(sin_js.status_code, con_js.status_code)
+        self.assertEqual(sin_js["Location"], con_js["Location"])
+
+    def test_la_cabecera_de_js_no_le_abre_la_puerta_a_quien_no_gestiona(self):
+        """Decir 'soy fetch' no es un permiso: el rol se comprueba igual."""
+        matricula = self.matricular(self.adulta)
+        self.pedir_cancelacion(self.adulta, matricula)
+        self.client.force_login(self.adulta.usuario)
+
+        respuesta = self.client.post(
+            reverse("gestion_resolver_cancelacion", args=[matricula.id, "aprobar"]),
+            headers={"x-requested-with": "XMLHttpRequest"},
+        )
+
+        self.assertNotEqual(respuesta.status_code, 200)
+        matricula.refresh_from_db()
+        self.assertEqual(matricula.estado, Matricula.ESTADO_CANCELACION)
 
     # -- lo que ve el profesor ----------------------------------------------
 
@@ -2988,3 +3037,147 @@ class BorradoProtegidoTests(TestCase):
         self.assertContains(respuesta, "1 matrículas en historial")
         self.assertNotContains(
             respuesta, reverse("promotoria_eliminar", args=[self.titeres.id]))
+
+
+class AccionesSinRecargaTests(TestCase):
+    """Las acciones no devuelven al usuario al principio de la página.
+
+    El sistema se usa de a tandas —confirmar quince matrículas, repartir treinta
+    estudiantes, vaciar la bandeja de cancelaciones— y con una recarga entera
+    por acción cada clic costaba volver a bajar hasta donde se iba.
+
+    La solución vive en el navegador (`acciones-sin-recarga`, en base.html):
+    intercepta el envío, pide la MISMA respuesta de siempre por fetch y cambia
+    solo lo de dentro de <main>. Desde Python no se puede ejecutar ese script,
+    así que lo que se prueba aquí es el contrato del que depende:
+
+    1. las vistas siguen redirigiendo (si alguna empezara a contestar JSON, el
+       script pintaría basura y el camino sin JavaScript se rompería);
+    2. el <main> y el script existen, que es lo que hace que haya algo que
+       cambiar;
+    3. los <details> llevan id, que es lo único que el servidor aporta para que
+       una promotoría abierta siga abierta después de actuar dentro de ella.
+    """
+
+    def setUp(self):
+        self.periodo = Periodo.objects.create(
+            nombre="2026-2", fecha_inicio=date(2026, 7, 1), fecha_fin=date(2026, 12, 15),
+            activo=True, matriculas_abiertas=True,
+        )
+        self.area = Area.objects.create(nombre="Música")
+        self.profesor = self.crear_perfil("profe", "Profe Díaz", "profesor")
+        self.director = self.crear_perfil("dire", "Directora", "director")
+        self.violin = Promotoria.objects.create(
+            nombre="Violín", area=self.area, profesor=self.profesor,
+        )
+        self.coro = Promotoria.objects.create(
+            nombre="Coro", area=self.area, profesor=self.profesor,
+        )
+        self.grupo = Grupo.objects.create(
+            promotoria=self.violin, nivel="basico", horario="Lunes 4pm",
+            salon="A1", cupo_maximo=10,
+        )
+
+    def crear_perfil(self, username, nombre, rol):
+        usuario = User.objects.create_user(username=username, password="x")
+        return Perfil.objects.create(
+            usuario=usuario, rol=rol, nombre_completo=nombre,
+            fecha_nacimiento=date(1990, 1, 1), telefono="3000000000",
+        )
+
+    def matricular(self, username="ana", estado="activa"):
+        usuario = User.objects.create_user(username=username, password="x")
+        perfil = Perfil.objects.create(
+            usuario=usuario, rol="estudiante", nombre_completo="Ana Ruiz",
+            fecha_nacimiento=date(1995, 3, 4), telefono="3000000000",
+        )
+        DatosEstudiante.objects.create(perfil=perfil, documento_identidad=username)
+        matricula = Matricula(
+            estudiante=perfil, promotoria=self.violin, periodo=self.periodo, estado=estado,
+        )
+        matricula.full_clean()
+        matricula.save()
+        return matricula
+
+    # -- lo que el script necesita encontrar --------------------------------
+
+    def test_el_shell_autenticado_trae_la_capa(self):
+        self.client.force_login(self.director.usuario)
+
+        respuesta = self.client.get(reverse("panel"))
+
+        self.assertContains(respuesta, "<main>")
+        self.assertContains(respuesta, "aria-busy")
+
+    def test_cada_promotoría_del_panel_tiene_id_propio(self):
+        """Sin id, el <details> reabierto sería el de la posición, no el de la
+        promotoría: al cambiar el orden se abriría la vecina."""
+        self.client.force_login(self.profesor.usuario)
+
+        respuesta = self.client.get(reverse("panel"))
+
+        self.assertContains(respuesta, f'id="promotoria-{self.violin.id}"')
+        self.assertContains(respuesta, f'id="promotoria-{self.coro.id}"')
+
+    def test_los_avisos_se_quedan_a_la_vista(self):
+        """Sin recarga, un mensaje que solo vive arriba del todo no lo lee nadie
+        cuando la acción se resolvió a mitad de una lista larga."""
+        self.client.force_login(self.director.usuario)
+
+        respuesta = self.client.get(reverse("panel"))
+
+        self.assertContains(respuesta, "position: sticky")
+
+    # -- el contrato de las vistas ------------------------------------------
+
+    def test_asignar_grupo_redirige_como_siempre(self):
+        matricula = self.matricular()
+        self.client.force_login(self.profesor.usuario)
+
+        respuesta = self.client.post(
+            reverse("panel_asignar_grupo", args=[matricula.id]),
+            {"grupo_id": self.grupo.id},
+        )
+
+        self.assertRedirects(respuesta, reverse("panel"))
+        matricula.refresh_from_db()
+        self.assertEqual(matricula.grupo, self.grupo)
+
+    def test_confirmar_matrícula_redirige_como_siempre(self):
+        matricula = self.matricular(estado="pendiente")
+        self.client.force_login(self.profesor.usuario)
+
+        respuesta = self.client.post(
+            reverse("panel_confirmar_matricula", args=[matricula.id]))
+
+        self.assertRedirects(respuesta, reverse("panel"))
+
+    def test_ninguna_acción_del_panel_contesta_json(self):
+        """El script pinta HTML: una vista que empezara a contestar JSON dejaría
+        el <main> vacío, y sin JavaScript mostraría el JSON en crudo."""
+        matricula = self.matricular()
+        self.client.force_login(self.profesor.usuario)
+
+        for url, datos in (
+            (reverse("panel_asignar_grupo", args=[matricula.id]), {"grupo_id": self.grupo.id}),
+            (reverse("panel_asignar_grupo", args=[matricula.id]), {"grupo_id": ""}),
+        ):
+            respuesta = self.client.post(url, datos, headers={"x-requested-with": "XMLHttpRequest"})
+
+            self.assertEqual(respuesta.status_code, 302, url)
+            self.assertNotIn("json", respuesta.get("Content-Type", "").lower())
+
+    def test_el_destino_de_la_redirección_es_una_página_pintable(self):
+        """El script pide la respuesta y busca un <main> dentro. Si el destino
+        no lo tuviera, se caería al recargar entero sin decir por qué."""
+        matricula = self.matricular()
+        self.client.force_login(self.profesor.usuario)
+
+        respuesta = self.client.post(
+            reverse("panel_asignar_grupo", args=[matricula.id]),
+            {"grupo_id": self.grupo.id},
+            follow=True,
+        )
+
+        self.assertContains(respuesta, "<main>")
+        self.assertContains(respuesta, "Ana Ruiz")
