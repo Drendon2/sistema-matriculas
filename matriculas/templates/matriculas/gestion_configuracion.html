@@ -28,190 +28,23 @@
       <p class="config-ayuda">{{ form.nombre_institucion.help_text }}</p>
     </div>
 
-    <!-- impeccable-carbonize-start bd510c6c -->
-    <style data-impeccable-css="bd510c6c">
-    /* El input nativo se oculta accesiblemente y el foco se pinta sobre la
-    etiqueta que hace de control. Repetido en los tres bloques a
-    propósito: @scope va keyado por variante, sin lista de selectores. */
-    @scope ([data-impeccable-variant="2"]) {
-    :scope .lg-file {
-    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
-    }
-    :scope .lg-quitar {
-    display: inline-flex; align-items: center; gap: 0.35rem; margin: 0.6rem 0 0;
-    font-size: 0.82rem; font-weight: 400; color: var(--ink-soft); cursor: pointer;
-    }
-    :scope .lg-quitar input { width: auto; margin: 0; }
-    :scope .lg-quitar:hover { color: var(--danger); }
-    :scope .lg-nombre {
-    font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-soft);
-    word-break: break-all; margin: 0.5rem 0 0;
-    }
-    }
-    @scope ([data-impeccable-variant="3"]) {
-    :scope .lg-file {
-    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
-    }
-    :scope .lg-quitar {
-    display: inline-flex; align-items: center; gap: 0.35rem; margin: 0.6rem 0 0;
-    font-size: 0.82rem; font-weight: 400; color: var(--ink-soft); cursor: pointer;
-    }
-    :scope .lg-quitar input { width: auto; margin: 0; }
-    :scope .lg-quitar:hover { color: var(--danger); }
-    :scope .lg-nombre {
-    font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-soft);
-    word-break: break-all; margin: 0.5rem 0 0;
-    }
-    }
-    
-    /* ---------- Variante 1: baldosa punteada de "añadir" ---------- */
-    @scope ([data-impeccable-variant="1"]) {
-    :scope .lg-file {
-    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
-    }
-    :scope .lg-quitar {
-    display: inline-flex; align-items: center; gap: 0.35rem; margin: 0.6rem 0 0;
-    font-size: 0.82rem; font-weight: 400; color: var(--ink-soft); cursor: pointer;
-    }
-    :scope .lg-quitar input { width: auto; margin: 0; }
-    :scope .lg-quitar:hover { color: var(--danger); }
-    :scope .lg-nombre {
-    font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-soft);
-    word-break: break-all; margin: 0.5rem 0 0;
-    }
-    :scope .lg-cabecera { display: flex; align-items: center; gap: 0.9rem; margin-bottom: 0.9rem; }
-    :scope .lg-vista {
-    width: 64px; height: 64px; object-fit: contain; flex: 0 0 auto;
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius-sm); padding: 0.35rem;
-    }
-    :scope .lg-cabecera .config-ayuda { margin: 0; }
-    :scope .lg-boton {
-    display: flex; align-items: center; justify-content: center; gap: 0.4rem;
-    width: 100%; min-height: 44px; margin: 0;
-    background: transparent; color: var(--accent);
-    border: 1px dashed var(--accent); border-radius: var(--radius-sm);
-    padding: 0.6rem 0.9rem; font-size: 0.9rem; font-weight: 700; cursor: pointer;
-    transition: background 0.15s ease, border-style 0.15s ease, color 0.15s ease;
-    }
-    :scope[data-p-ancho="ajustado"] .lg-boton { width: auto; display: inline-flex; }
-    :scope .lg-boton:hover { background: var(--accent-soft); border-style: solid; color: var(--accent-dark); }
-    :scope .lg-file:focus-visible + .lg-boton {
-    border-style: solid; box-shadow: 0 0 0 3px var(--accent-soft);
-    }
-    }
-    
-    /* ---------- Variante 2: la propia miniatura es el control ---------- */
-    @scope ([data-impeccable-variant="2"]) {
-    :scope .lg-fila { display: flex; align-items: flex-start; gap: 1rem; }
-    :scope .lg-caja {
-    position: relative; display: block; margin: 0; flex: 0 0 auto;
-    width: 88px; height: 88px; padding: 0.45rem;
-    background: var(--surface); border: 1px dashed var(--border-strong);
-    border-radius: var(--radius); cursor: pointer;
-    transition: border-color 0.15s ease, background 0.15s ease;
-    }
-    :scope[data-p-tamano="grande"] .lg-caja { width: 116px; height: 116px; }
-    :scope .lg-caja:hover { border-color: var(--accent); border-style: solid; background: var(--accent-soft); }
-    :scope .lg-file:focus-visible + .lg-caja {
-    border-color: var(--accent); border-style: solid; box-shadow: 0 0 0 3px var(--accent-soft);
-    }
-    :scope .lg-caja img { width: 100%; height: 100%; object-fit: contain; display: block; }
-    :scope .lg-mas {
-    position: absolute; right: -8px; bottom: -8px;
-    width: 28px; height: 28px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    background: var(--accent); color: #fff;
-    box-shadow: 0 1px 3px rgba(24,36,32,0.3);
-    }
-    :scope .lg-caja:hover .lg-mas { background: var(--accent-dark); }
-    :scope .lg-texto { flex: 1 1 auto; min-width: 0; }
-    :scope .lg-texto .config-ayuda { margin-top: 0; }
-    }
-    
-    /* ---------- Variante 3: fila compacta de barra de herramientas ---------- */
-    @scope ([data-impeccable-variant="3"]) {
-    :scope .lg-fila { display: flex; align-items: center; flex-wrap: wrap; gap: 0.65rem; }
-    :scope .lg-vista {
-    width: 40px; height: 40px; object-fit: contain; flex: 0 0 auto;
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius-sm); padding: 0.25rem;
-    }
-    :scope .lg-boton {
-    display: inline-flex; align-items: center; gap: 0.35rem; margin: 0;
-    min-height: 36px; background: var(--accent); color: #fff;
-    border: 1px solid var(--accent); border-radius: var(--radius-sm);
-    padding: 0.4rem 0.8rem; font-size: 0.8rem; font-weight: 700; cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease;
-    }
-    :scope .lg-boton:hover { background: var(--accent-dark); border-color: var(--accent-dark); }
-    :scope .lg-file:focus-visible + .lg-boton { box-shadow: 0 0 0 3px var(--accent-soft); }
-    :scope .lg-nombre { margin: 0; flex: 1 1 10rem; }
-    :scope[data-p-nombre] .lg-nombre { display: block; }
-    :scope .lg-nombre { display: none; }
-    :scope .lg-quitar { margin: 0; }
-    :scope .lg-fila + .config-ayuda { margin-top: 0.7rem; }
-    }
-    </style>
-    <!-- impeccable-param-values bd510c6c: {"ancho":"completo"} -->
-    <!-- impeccable-carbonize-end bd510c6c -->
-    <div data-impeccable-variant="1" style="display: contents">
-      <div class="config-campo">
-        <label class="config-etiqueta" for="id_logo_v1">{{ form.logo.label }}</label>
-        <div class="lg-cabecera">
-          <img class="lg-vista"
-               src="{% if configuracion.logo %}{% url 'logo_institucion' %}{% else %}{% static 'matriculas/img/logo.webp' %}{% endif %}"
-               alt="Logo actual" width="64" height="64">
-          <p class="config-ayuda">{% if configuracion.logo %}Logo propio cargado.{% else %}Se está usando el logo por defecto del proyecto.{% endif %}</p>
-        </div>
-        <input class="lg-file" type="file" name="logo" id="id_logo_v1" accept="image/*">
-        <label class="lg-boton" for="id_logo_v1">+ {% if configuracion.logo %}Cambiar el logo{% else %}Subir un logo{% endif %}</label>
-        <p class="lg-nombre" data-nombre-archivo>{{ configuracion.logo.name }}</p>
-        {% if configuracion.logo %}
-        <label class="lg-quitar">
-          <input type="checkbox" name="logo-clear" id="logo-clear_v1"> Quitar y volver al logo por defecto
-        </label>
-        {% endif %}
-        {{ form.logo.errors }}
-
-        <script>
-          (function () {
-            var env = document.querySelector('[data-impeccable-variants="bd510c6c"]');
-            if (!env || env.__lgSync) { return; }
-            env.__lgSync = true;
-
-            var sinc = function () {
-              Array.prototype.forEach.call(env.querySelectorAll("[data-impeccable-variant]"), function (v) {
-                var oculto = getComputedStyle(v).display === "none";
-                Array.prototype.forEach.call(v.querySelectorAll("input[name]"), function (c) {
-                  c.disabled = oculto;
-                });
-              });
-            };
-            new MutationObserver(sinc).observe(env, { attributes: true, subtree: true, attributeFilter: ["style"] });
-            sinc();
-
-            // Con el input nativo oculto, el nombre del archivo elegido es la
-            // única señal de que la selección funcionó.
-            Array.prototype.forEach.call(env.querySelectorAll('input[type="file"]'), function (entrada) {
-              entrada.addEventListener("change", function () {
-                var bloque = entrada.closest("[data-impeccable-variant]");
-                var destino = bloque && bloque.querySelector("[data-nombre-archivo]");
-                if (!destino) { return; }
-                if (destino.dataset.original === undefined) {
-                  destino.dataset.original = destino.textContent.trim();
-                }
-                destino.textContent = entrada.files.length
-                  ? entrada.files[0].name
-                  : destino.dataset.original;
-              });
-            });
-          })();
-        </script>
+    <div class="config-campo">
+      <label class="config-etiqueta" for="{{ form.logo.id_for_label }}">{{ form.logo.label }}</label>
+      <div class="config-logo">
+        <img class="config-logo-vista"
+             src="{% if configuracion.logo %}{% url 'logo_institucion' %}{% else %}{% static 'matriculas/img/logo.webp' %}{% endif %}"
+             alt="Logo actual" width="64" height="64">
+        <p class="config-ayuda">{% if configuracion.logo %}Logo propio cargado.{% else %}Se está usando el logo por defecto del proyecto.{% endif %}</p>
       </div>
+      <input class="config-logo-file" type="file" name="logo" id="{{ form.logo.id_for_label }}" accept="image/*">
+      <label class="config-logo-boton" for="{{ form.logo.id_for_label }}">+ {% if configuracion.logo %}Cambiar el logo{% else %}Subir un logo{% endif %}</label>
+      <p class="config-logo-nombre" data-nombre-archivo>{{ configuracion.logo.name }}</p>
+      {% if configuracion.logo %}
+      <label class="config-logo-quitar">
+        <input type="checkbox" name="logo-clear" id="id_logo-clear"> Quitar y volver al logo por defecto
+      </label>
+      {% endif %}
+      {{ form.logo.errors }}
     </div>
 
     <div class="config-campo">
@@ -246,4 +79,20 @@
     <button type="submit" class="btn">Guardar</button>
   </form>
 </div>
+
+<script>
+  // El input de archivo va oculto y la etiqueta hace de control (ver
+  // .config-logo-file en base.html), así que el navegador ya no escribe por su
+  // cuenta el nombre del archivo elegido. Sin esta línea, tras escoger un logo
+  // la pantalla se quedaría exactamente igual que antes de escogerlo.
+  (function () {
+    var entrada = document.getElementById("{{ form.logo.id_for_label }}");
+    var destino = document.querySelector("[data-nombre-archivo]");
+    if (!entrada || !destino) { return; }
+    var original = destino.textContent.trim();
+    entrada.addEventListener("change", function () {
+      destino.textContent = entrada.files.length ? entrada.files[0].name : original;
+    });
+  })();
+</script>
 {% endblock %}

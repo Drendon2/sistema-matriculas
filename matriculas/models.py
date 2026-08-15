@@ -386,6 +386,17 @@ class Perfil(models.Model):
     def es_menor(self):
         return self.edad < 18
 
+    @property
+    def encuesta_pendiente(self):
+        """¿A esta persona le falta contestar la encuesta demográfica?
+
+        Cubre los dos casos, que para quien la tiene que llenar son el mismo:
+        no haberla empezado nunca, y tenerla a medias (ver
+        `EncuestaDemografica.preguntas_faltantes`).
+        """
+        encuesta = getattr(self, "encuesta", None)
+        return encuesta is None or not encuesta.esta_completa
+
 
 class EncuestaDemografica(models.Model):
     """Obligatoria para todos los usuarios. Los campos SENSIBLES quedan opcionales.
@@ -513,12 +524,41 @@ class EncuestaDemografica(models.Model):
     autoriza_tratamiento_datos = models.BooleanField(default=False, verbose_name="autoriza tratamiento de datos")
     fecha_autorizacion = models.DateTimeField(null=True, blank=True, verbose_name="fecha de autorización")
 
+    # Los que no admiten vacío. `autoriza_tratamiento_datos` NO está aquí a
+    # propósito: es un booleano y "no autorizo" es una respuesta legítima, no
+    # una pregunta sin contestar.
+    CAMPOS_OBLIGATORIOS = ("genero", "barrio", "estrato", "nivel_educativo", "ocupacion")
+
     class Meta:
         verbose_name = "Encuesta demográfica"
         verbose_name_plural = "Encuestas demográficas"
 
     def __str__(self):
         return f"Encuesta de {self.perfil.nombre_completo}"
+
+    @property
+    def preguntas_faltantes(self):
+        """Preguntas obligatorias que esta encuesta tiene en blanco.
+
+        Existir una encuesta no significa estar contestada, y esa diferencia no
+        es teórica: la migración 0016 vació el texto libre de `nivel_educativo`
+        y `ocupacion` para poder estrechar la columna a listas cerradas, así que
+        toda encuesta anterior a ese cambio quedó a medias. El formulario de hoy
+        no deja guardarlas vacías, pero las de entonces siguen ahí y nada las
+        señalaba: contaban como diligenciadas en la cifra de la portada.
+
+        Devuelve los nombres legibles, que es lo que hay que enseñarle a la
+        persona; para decidir usa `esta_completa`.
+        """
+        return [
+            self._meta.get_field(campo).verbose_name
+            for campo in self.CAMPOS_OBLIGATORIOS
+            if getattr(self, campo) in (None, "")
+        ]
+
+    @property
+    def esta_completa(self):
+        return not self.preguntas_faltantes
 
 
 class EncuestaSatisfaccion(models.Model):

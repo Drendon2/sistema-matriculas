@@ -258,10 +258,27 @@ Un punto de 8px del color de Área (`tag-0`…`tag-7`, ver `tag_color`), antes d
 ### Data Bar (`.stat-bar-fila`) — Estadísticas
 Fila horizontal etiqueta + pista + relleno + cifra, para cualquier magnitud por categoría (estudiantes por promotoría, grupos por nivel, respuestas de encuesta). El relleno usa `--accent` por defecto (una sola magnitud, sin identidad que distinguir); cuando la categoría YA tiene un color propio en el sistema (Área → `tag_color`), el relleno reutiliza ese mismo color en vez de inventar uno nuevo — nunca un color distinto por barra sin motivo. El árbol Departamento → Promotoría (`.dash-departamento`/`.dash-promotorias`) anida las promotorías bajo su Área en vez de repetir la cifra en dos listas planas separadas. Ver la excepción de radio en Shapes.
 
+**Una tanda de barras de encuesta dibuja siempre a toda la población.** Quien no cae en ninguna opción entra como una fila final de **"Sin responder"**, en el mismo gris de `--border-strong` que el sector gris de la torta y bajo una línea fina, porque no pertenece a la escala de la pregunta. Es la misma regla del todo que ya cumplía la torta, y su ausencia era un fallo real: una pregunta contestada por dos de cinco personas se dibujaba entera y nada avisaba de las otras tres.
+
+Cada departamento es un `<details>` nativo, sin JavaScript, con el renglón como `<summary>`: con 26 promotorías la lista completa obligaba a bajar mucho para comparar dos áreas. **Plegado no esconde el dato, solo el desglose** — el renglón cerrado conserva su barra, su cifra y sus micro-columnas. El departamento que pierde la mitad o más de su gente **arranca abierto**: acortar la página no puede costar esconder justo la fila que hay que mirar.
+
+### Micro-columnas de permanencia (`.perm`) — Estadísticas
+Tres columnas verticales de `8px` sobre una línea base, al final de una fila del árbol de departamentos: **sigue**, **deja** y **no volvió**. Es la única gráfica vertical del sistema, y esa orientación es el punto — la fila ya tiene una barra horizontal de magnitud, y una segunda barra horizontal al lado obligaría a leer dos escalas en la misma dirección. Girada 90°, la micro-gráfica se lee como otra cosa y deja de competir.
+
+Sustituye a las tres cifras en monoespaciada que ocupaban media fila: en texto no se alineaban entre renglones, así que la pregunta real —en qué promotoría se está yendo la gente— había que responderla número por número en vez de de un vistazo.
+
+Cada columna se distingue por **forma antes que por color**, igual que el marcador de estado: *sigue* sólida (color de Área en el departamento, tinta suave en la promotoría), *deja* sólida con **trama diagonal**, *no volvió* **hueca** con contorno. La trama no es decorativa y no se quita: la columna roja queda pegada al ámbar o al naranja de un Área, y bajo daltonismo protán ese borde desaparece si la única diferencia es el matiz. El hueco de *no volvió* dice además que mide otra población — la del periodo anterior.
+
+Dos ausencias que se ven distinto porque significan lo contrario: un **0% real** deja una marca de `2px` sobre la base, y **sin referencia** es la ranura completa en punteado. Un dato en cero que no dibujara nada sería indistinguible de un dato que no existe. La leyenda va **una sola vez** por sección, nunca por fila; el porcentaje exacto vive en `title` y la fila entera lleva `aria-label`.
+
+Los remates son planos: la píldora pertenece a la pista horizontal, no a una columna de `8px`.
+
 ### Torta (`.torta`) — Estadísticas
 Disco de `116px` con su leyenda al lado, para las preguntas donde lo que importa es **qué parte del total** es cada opción y las opciones son pocas (género, zona). Las escalas con orden propio —estrato, nivel educativo— se quedan en barra de dato: una torta las obligaría a comparar ángulos parecidos.
 
-Cada sector es un `<circle>` con el trazo tan grueso como el diámetro y `stroke-dasharray` recortando su arco; el grupo va rotado `-90°` para empezar a las 12. Sin JavaScript ni librerías: la geometría se calcula en la vista. Entre sectores va un hueco de `2px` del color del fondo — **separación, nunca un borde dibujado alrededor**; un sector único no lo lleva, porque solo dejaría una muesca contra sí mismo.
+Cada sector es un `<circle>` con el trazo tan grueso como el diámetro y `stroke-dasharray` recortando su arco; el grupo va rotado `-90°` para empezar a las 12. Sin JavaScript ni librerías: la geometría se calcula en la vista.
+
+**El SVG va dentro de `{% localize off %}`, y no es opcional.** La interfaz está en `es-co`, que escribe los decimales con coma, y en SVG la coma no es un decimal sino el separador entre valores: `stroke-dasharray="73,4 188,5"` deja de ser un arco y pasa a ser un patrón de cuatro tramos que rellena casi el disco. La torta salió mal en producción con la aritmética perfectamente correcta y todos sus tests en verde, porque los tests miraban los números y no el marcado. Cualquier gráfica nueva que escriba un número decimal en un atributo SVG hereda esta regla, y se prueba sobre el HTML renderizado. Entre sectores va un hueco de `2px` del color del fondo — **separación, nunca un borde dibujado alrededor**; un sector único no lo lleva, porque solo dejaría una muesca contra sí mismo.
 
 La leyenda no es un pie de foto, es la mitad de la gráfica: lleva el punto de color, la etiqueta, la cifra y el porcentaje. Es lo que permite leerla sin depender del matiz, y la compensación obligatoria del tono que no alcanza 3:1. Lista **todas** las opciones, incluidas las que están en cero —que por definición no dibujan sector— atenuadas en tinta tenue: si desaparecieran, nadie sabría que la opción existe.
 
@@ -312,3 +329,5 @@ El sello circular `.escudo` (52px, fondo blanco, borde esmeralda de 2px, inicial
 - **Don't** usar los colores de Área (`tag-*`) en una gráfica de sectores — además de chocar semánticamente con el árbol de departamentos, su verde azulado y su rosa son indistinguibles bajo daltonismo protán.
 - **Don't** asignar el color de una gráfica por ranking — sigue a la opción, para que filtrar o cambiar los conteos no repinte a las demás.
 - **Don't** separar sectores ni barras con un borde dibujado alrededor — la separación es un hueco del color del fondo.
+- **Don't** dejar que un decimal llegue localizado a un atributo SVG — la coma de `es-co` parte el valor en dos y rompe la geometría en silencio.
+- **Don't** dibujar solo a quien respondió — la gráfica cuenta la población entera, y lo que falta se ve, en gris, tanto en torta como en barras.

@@ -1,3 +1,4 @@
+{% load l10n %}
 {% comment %}
 Gráfica de torta con su leyenda.
 
@@ -15,7 +16,16 @@ que es lo que permite leer la gráfica sin depender del color (uno de los tonos
 queda por debajo de 3:1 contra el fondo, y esa es su compensación obligatoria).
 También lista las opciones en cero, que por definición no dibujan sector: sin
 ella, una opción sin respuestas simplemente desaparecería sin explicación.
+
+El `{% templatetag openblock %} localize off {% templatetag closeblock %}` de
+abajo NO es opcional. La interfaz está en es-co, que escribe los decimales con
+coma, y en SVG la coma no es un decimal: es el separador entre valores. Con
+ella, `stroke-dasharray="73,4 188,5"` deja de significar "73.4 pintado, 188.5
+en blanco" y pasa a ser un patrón de cuatro tramos (73 sí, 4 no, 188 sí, 5 no)
+que rellena casi el disco entero. La torta de género salía naranja de punta a
+punta con un hilo azul, aunque la aritmética de `_torta` fuera correcta.
 {% endcomment %}
+{% localize off %}
 {% if not torta.total %}
   <p class="vacio">Sin respuestas todavía.</p>
 {% else %}
@@ -44,3 +54,4 @@ ella, una opción sin respuestas simplemente desaparecería sin explicación.
   </ul>
 </div>
 {% endif %}
+{% endlocalize %}

@@ -44,14 +44,30 @@
       qué parte no regresó a esa misma promotoría.
     {% endif %}
   </p>
+  {% comment %}
+  La leyenda va una sola vez y no por fila: es lo que hace decodificable la
+  forma de cada columna, y repetirla 26 veces la volvería el ruido que estas
+  micro-gráficas vinieron a quitar.
+  {% endcomment %}
+  <div class="perm-leyenda">
+    <span><i class="perm-col perm-sigue"></i>Sigue</span>
+    <span><i class="perm-col perm-deja"></i>Deja</span>
+    {% if periodo_previo %}<span><i class="perm-col perm-novolvio"></i>No volvió</span>{% endif %}
+  </div>
   {% for d in arbol_departamentos %}
-  <div class="dash-departamento">
-    <div class="stat-bar-fila">
+  {% comment %}
+  Arranca plegado salvo que el departamento esté perdiendo la mitad o más de su
+  gente: acortar la página no puede costar esconder justo la fila que hay que
+  mirar. Es `<details>` nativo, sin JavaScript, como la encuesta de más abajo.
+  {% endcomment %}
+  <details class="dash-departamento"{% if d.pct_desercion >= 50 %} open{% endif %}>
+    <summary class="stat-bar-fila dep-cabecera">
+      <svg class="dep-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
       <span class="stat-bar-etiqueta"><span class="tag-dot {{ d.tag_class }}"></span>{{ d.nombre }}</span>
       <div class="stat-bar-pista"><div class="stat-bar-relleno {{ d.tag_class }}" style="width: {{ d.porcentaje }}%;"></div></div>
       <span class="stat-bar-num">{{ d.total }}</span>
-      {% include "matriculas/_permanencia.html" with fila=d hay_previo=periodo_previo %}
-    </div>
+      {% include "matriculas/_permanencia.html" with fila=d hay_previo=periodo_previo tono=d.tag_class %}
+    </summary>
     <div class="dash-promotorias">
       {% for p in d.promotorias %}
       <div class="stat-bar-fila">
@@ -62,7 +78,7 @@
       </div>
       {% endfor %}
     </div>
-  </div>
+  </details>
   {% endfor %}
 {% endif %}
 
@@ -112,6 +128,23 @@
 
   <p class="campo-info" style="margin: 0.9rem 0 1.3rem;">{{ total_encuestas }} de {{ total_con_rol }} personas con rol asignado han diligenciado la encuesta. Estas cifras son agregadas — ninguna respuesta individual se muestra aquí.</p>
 
+  {% comment %}
+  Una encuesta a medias contaba como diligenciada y no lo estaba: al pasar la
+  encuesta a listas cerradas (migración 0016) hubo que vaciar el texto libre de
+  nivel educativo y ocupación, y esas respuestas nunca se volvieron a pedir. Sin
+  este aviso, la única señal era que las barras de esas dos preguntas sumaban
+  menos que el total, y ni siquiera eso se veía antes.
+  {% endcomment %}
+  {% if encuestas_incompletas %}
+  <p class="aviso" style="margin-bottom: 1.3rem;">
+    <strong>{{ encuestas_incompletas }} de esas {{ total_encuestas }} está{{ encuestas_incompletas|pluralize:"n" }} incompleta{{ encuestas_incompletas|pluralize }}</strong>
+    y aparece{{ encuestas_incompletas|pluralize:"n" }} como «Sin responder» en las preguntas que le{{ encuestas_incompletas|pluralize:"s" }} faltan. Son
+    encuestas anteriores al cambio a listas cerradas: cada persona ve lo que le falta en
+    «Mi perfil» y puede completarlo desde ahí. No se rellenan solas ni desde aquí — es información
+    de la persona, no del sistema.
+  </p>
+  {% endif %}
+
   <div class="dash-grid-2">
     <div>
       <h4>Género</h4>
@@ -142,7 +175,13 @@
   que género y estrato, y no con las viejas listas de "top 5": aquel recorte
   existía porque el texto libre generaba valores sin fin y había que quedarse
   con los más repetidos. Ahora la lista de opciones es finita y conocida, así
-  que se muestran todas —incluidas las que nadie eligió— y las cifras suman.
+  que se muestran todas, incluidas las que nadie eligió.
+
+  Las cifras cuadran con el total de encuestas porque quien no cae en ninguna
+  opción entra como "Sin responder" al final. Aquí eso no es raro y no siempre
+  significa que la persona se saltara la pregunta: la migración 0016 vació el
+  texto libre de las encuestas anteriores al cambio a listas cerradas, así que
+  esa gente aparece sin responder incluso en los campos obligatorios.
   {% endcomment %}
   <div class="dash-grid-2" style="margin-top: 1.7rem;">
     <div>

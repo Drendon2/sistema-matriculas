@@ -1202,5 +1202,9 @@ def mi_perfil(request):
         "documento_form": documento_form,
         "encuesta_form": encuesta_form,
         "encuesta": encuesta,
+        # Vacía cuando no hay nada que pedir, así que la plantilla la usa
+        # también como "¿está pendiente?". Sin encuesta empezada no se listan
+        # preguntas sueltas: ahí lo que falta es la encuesta entera.
+        "faltan_preguntas": encuesta.preguntas_faltantes if encuesta else [],
         "estadisticas": _estadisticas_mi_perfil(perfil),
     })

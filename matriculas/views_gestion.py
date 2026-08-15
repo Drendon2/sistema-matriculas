@@ -449,14 +449,13 @@ def _con_permanencia(fila):
     return fila
 
 
-def _stats_choices(encuesta_qs, campo, choices):
+def _stats_choices(encuesta_qs, campo, choices, total_encuestas=None):
     """Conteo de un campo de la encuesta por cada opción declarada.
 
     Sustituye al viejo "top 5 de texto libre", que existía solo porque estos
     campos se escribían a mano: había que recortar a cinco porque la lista de
     valores distintos no tenía fin, y aun así «Bachillerato» y «bachiller»
-    salían como dos filas. Con listas cerradas se pueden mostrar todas las
-    opciones y la suma cuadra.
+    salían como dos filas.
 
     Respeta el orden en que están declaradas las choices en vez de ordenar por
     frecuencia: son escalas con un orden propio (de menos a más estudios, del
@@ -465,17 +464,43 @@ def _stats_choices(encuesta_qs, campo, choices):
 
     Las opciones sin respuestas salen en cero en lugar de desaparecer, para que
     el panel enseñe siempre la misma lista y se vea qué NO contesta la gente.
-    Los vacíos (campos opcionales sin responder) no cuentan como opción: no son
-    una respuesta, y se deducen de la diferencia con el total de encuestas.
+
+    Con `total_encuestas`, la gente que no cae en ninguna opción se añade como
+    una fila final de "Sin responder". **Esa fila no es decorativa y omitirla
+    fue un error real**: las barras contaban solo a quien tenía un valor de la
+    lista, así que una pregunta contestada por 2 de 5 personas se dibujaba
+    entera, sin nada que avisara de las otras 3, y contradecía a la propia
+    cabecera de la pantalla. Pasa con los campos opcionales y también con los
+    obligatorios, porque la migración 0016 vació el texto libre de las
+    encuestas anteriores al cambio a listas cerradas.
+
+    Es la misma cuenta que ya hacía `_torta` y la misma regla del sistema de
+    diseño: el todo es la población, no la suma de respuestas. Se omite el
+    argumento cuando el resultado alimenta a `_torta`, que añade su propio
+    sector gris y contaría dos veces esa fila.
     """
     conteos = {
         fila[campo]: fila["total"]
         for fila in encuesta_qs.values(campo).annotate(total=Count("id"))
     }
-    return _con_porcentaje([
+    filas = [
         {"etiqueta": etiqueta, "total": conteos.get(codigo, 0)}
         for codigo, etiqueta in choices
-    ])
+    ]
+
+    if total_encuestas is not None:
+        # Contra el total y no contra los vacíos: así también caen aquí los
+        # valores que no están en la lista (texto libre de antes de la 0016),
+        # que si no desaparecerían sin dejar rastro en ninguna fila.
+        sin_responder = max(0, total_encuestas - sum(f["total"] for f in filas))
+        if sin_responder:
+            filas.append({
+                "etiqueta": "Sin responder",
+                "total": sin_responder,
+                "sin_responder": True,
+            })
+
+    return _con_porcentaje(filas)
 
 
 @requiere_rol("administrador")
@@ -586,14 +611,24 @@ def estadisticas(request):
     encuesta_qs = EncuestaDemografica.objects.all()
     total_encuestas = encuesta_qs.count()
 
+    # Tener encuesta no es tenerla contestada: las anteriores a la migración
+    # 0016 perdieron nivel educativo y ocupación al pasar esos campos a listas
+    # cerradas. La cuenta se hace en Python porque `estrato` es entero y un
+    # filtro de "vacío" que sirva para texto y para número a la vez sale peor
+    # que recorrer una tabla que tiene una fila por persona.
+    encuestas_incompletas = sum(1 for encuesta in encuesta_qs if not encuesta.esta_completa)
+
     # Todas las escalas de la encuesta pasan por el mismo helper para que el
     # panel entero se lea igual. Género pierde con esto su orden por frecuencia
     # y pasa al de la lista, como el resto: dentro de un mismo panel, dos
     # criterios de orden distintos solo invitan a leer mal una gráfica.
+    # Género va sin `total_encuestas` porque termina en una torta, que pone su
+    # propio sector de "sin responder".
     genero_stats = _stats_choices(encuesta_qs, "genero", EncuestaDemografica.GENEROS)
     estrato_stats = _stats_choices(
         encuesta_qs, "estrato",
         [(valor, f"Estrato {etiqueta}") for valor, etiqueta in EncuestaDemografica.ESTRATOS],
+        total_encuestas,
     )
 
     autoriza_si = encuesta_qs.filter(autoriza_tratamiento_datos=True).count()
@@ -610,6 +645,7 @@ def estadisticas(request):
         "total_promotorias": Promotoria.objects.count(),
         "total_grupos": Grupo.objects.count(),
         "total_encuestas": total_encuestas,
+        "encuestas_incompletas": encuestas_incompletas,
         "total_con_rol": Perfil.objects.exclude(rol="").count(),
         # Género y zona van en torta y no en barras: en las dos la pregunta es
         # qué parte del total es cada opción, y son pocas (4 y 3). El resto de
@@ -627,17 +663,23 @@ def estadisticas(request):
         "pct_autoriza_si": pct_autoriza_si,
         "pct_autoriza_no": 100 - pct_autoriza_si,
         "nivel_educativo_stats": _stats_choices(
-            encuesta_qs, "nivel_educativo", EncuestaDemografica.NIVELES_EDUCATIVOS),
+            encuesta_qs, "nivel_educativo", EncuestaDemografica.NIVELES_EDUCATIVOS,
+            total_encuestas),
         "ocupacion_stats": _stats_choices(
-            encuesta_qs, "ocupacion", EncuestaDemografica.OCUPACIONES),
+            encuesta_qs, "ocupacion", EncuestaDemografica.OCUPACIONES,
+            total_encuestas),
         "afiliacion_salud_stats": _stats_choices(
-            encuesta_qs, "afiliacion_salud", EncuestaDemografica.AFILIACIONES_SALUD),
+            encuesta_qs, "afiliacion_salud", EncuestaDemografica.AFILIACIONES_SALUD,
+            total_encuestas),
         "grupo_etnico_stats": _stats_choices(
-            encuesta_qs, "grupo_etnico", EncuestaDemografica.GRUPOS_ETNICOS),
+            encuesta_qs, "grupo_etnico", EncuestaDemografica.GRUPOS_ETNICOS,
+            total_encuestas),
         "discapacidad_stats": _stats_choices(
-            encuesta_qs, "discapacidad", EncuestaDemografica.DISCAPACIDADES),
+            encuesta_qs, "discapacidad", EncuestaDemografica.DISCAPACIDADES,
+            total_encuestas),
         "victima_conflicto_stats": _stats_choices(
-            encuesta_qs, "victima_conflicto_armado", EncuestaDemografica.VICTIMAS_CONFLICTO),
+            encuesta_qs, "victima_conflicto_armado", EncuestaDemografica.VICTIMAS_CONFLICTO,
+            total_encuestas),
     })
 
 

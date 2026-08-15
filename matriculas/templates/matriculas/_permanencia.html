@@ -1,32 +1,38 @@
 {% comment %}
-Las cifras de permanencia que acompañan a una barra del árbol de departamentos.
+Las cifras de permanencia que acompañan a una barra del árbol de departamentos,
+como una micro-gráfica de columnas verticales al final del renglón.
 
 Contexto:
   fila ........ un nodo del árbol, ya pasado por `_con_permanencia`
   hay_previo .. el periodo anterior, o vacío si no hay con qué comparar
+  tono ........ clase de color de Área (`tag-N`) para la columna de permanencia,
+                o vacío para heredar el gris de las filas de promotoría
 
-Van como texto y no como una segunda barra a propósito: la barra de la fila ya
-está diciendo una magnitud (cuánta gente), y meterle al lado otra barra de
-composición obligaría a leer dos escalas distintas en el mismo renglón.
+Van en columnas y no en texto porque la comparación que importa es entre
+renglones, no dentro de uno: la pregunta es en qué promotoría se está yendo la
+gente. Tres cifras en monoespaciada no se alineaban entre filas y además
+empujaban la barra de magnitud, que es la que manda.
 
-"No volvió" solo aparece cuando hay un periodo anterior con el que comparar. Si
-no lo hay, se escribe que no hay referencia en vez de un 0%, que se leería como
-"no se fue nadie" — lo contrario de lo que significa.
+Van en vertical y no como una segunda barra horizontal por lo mismo de siempre:
+dos barras horizontales en un renglón obligan a leer dos escalas en la misma
+dirección y se confunden. Girada 90°, la micro-gráfica se lee como otra cosa.
+
+Cada columna se distingue por FORMA antes que por color, igual que el marcador
+de estado. El porcentaje exacto va en `title` y el renglón entero lleva su
+`aria-label`: la gráfica es el vistazo, no la única vía al dato.
 {% endcomment %}
-<span class="permanencia">
-  <span class="permanencia-dato" title="Siguen matriculados en el periodo">
-    {{ fila.pct_continuan }}% sigue
-  </span>
-  <span class="permanencia-dato permanencia-fuga" title="Se retiraron durante el periodo">
-    {{ fila.pct_desercion }}% deja
-  </span>
+<span class="perm" role="img" aria-label="Sigue {{ fila.pct_continuan }}%, deja {{ fila.pct_desercion }}%{% if hay_previo %}{% if fila.pct_no_renovo is not None %}, no volvió {{ fila.pct_no_renovo }}%{% else %}, sin referencia de no retorno{% endif %}{% endif %}.">
+  <i class="perm-col perm-sigue"
+     style="height: {{ fila.pct_continuan }}%;{% if tono %} background: var(--{{ tono }});{% endif %}"
+     title="{{ fila.pct_continuan }}% sigue matriculado"></i>
+  <i class="perm-col perm-deja" style="height: {{ fila.pct_desercion }}%;"
+     title="{{ fila.pct_desercion }}% se retiró durante el periodo"></i>
   {% if hay_previo %}
-  <span class="permanencia-dato permanencia-fuga" title="No regresaron del periodo anterior">
-    {% if fila.pct_no_renovo is None %}
-      <span class="vacio" style="padding:0;font-size:inherit;">sin referencia</span>
+    {% if fila.pct_no_renovo is not None %}
+      <i class="perm-col perm-novolvio" style="height: {{ fila.pct_no_renovo }}%;"
+         title="{{ fila.pct_no_renovo }}% no volvió del periodo anterior"></i>
     {% else %}
-      {{ fila.pct_no_renovo }}% no volvió
+      <i class="perm-col perm-sinref" title="Sin gente del periodo anterior con la que comparar"></i>
     {% endif %}
-  </span>
   {% endif %}
 </span>

@@ -300,18 +300,84 @@
   .stat-bar-relleno { height: 100%; border-radius: 5px; background: var(--accent); }
   .stat-bar-num { flex: 0 0 auto; font-family: var(--font-mono); font-weight: 700; font-size: 0.82rem; color: var(--ink); min-width: 26px; text-align: right; }
 
-  /* Cifras de permanencia al final de una barra del árbol. En monoespaciada y
-     con ancho fijo por dato para que las columnas se lean en vertical entre
-     filas; en tinta tenue porque son lectura secundaria — la barra manda. */
-  .permanencia {
-    flex: 0 0 auto; display: flex; gap: 0.7rem; margin-left: 0.9rem;
-    font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-faint);
+  /* "Sin responder" en una tanda de barras: el mismo gris y el mismo papel que
+     el sector gris de la torta — no es una opción de la pregunta, es la
+     ausencia de respuesta, y tiene que leerse como tal sin competir con las
+     opciones reales. Va bajo una línea porque no pertenece a la escala: la
+     lista de arriba es la pregunta, esto es cuánta gente se quedó fuera. */
+  .stat-bar-fila-ausente {
+    margin-top: 0.8rem; padding-top: 0.7rem; border-top: 1px solid var(--border);
   }
-  .permanencia-dato { white-space: nowrap; }
-  /* Lo que se va lleva el rojo del sistema, el mismo de "retirada". */
-  .permanencia-fuga { color: var(--danger); }
+  .stat-bar-fila-ausente .stat-bar-etiqueta,
+  .stat-bar-fila-ausente .stat-bar-num { color: var(--ink-faint); }
+  .stat-bar-fila-ausente .stat-bar-relleno { background: var(--border-strong); }
 
-  .dash-departamento { margin-bottom: 1.4rem; }
+  /* Permanencia: micro-columnas al final de una barra del árbol.
+     Antes eran tres cifras en texto, y ocupaban media fila: empujaban la barra
+     de magnitud —que es la que manda— y no se alineaban entre renglones, así
+     que la pregunta real ("¿en qué promotoría se está yendo la gente?") había
+     que responderla leyendo número por número. Tres columnas de ancho fijo se
+     comparan de un vistazo en 40px.
+     Se apoyan en una línea base propia: con ella, una columna en cero se sigue
+     leyendo como una ranura vacía y no como un dato que falta. */
+  .perm {
+    flex: 0 0 auto; display: flex; align-items: flex-end; gap: 3px;
+    height: 24px; margin-left: 0.9rem; padding: 0 2px;
+    border-bottom: 1px solid var(--border-strong);
+  }
+  /* Piso de 2px: un dato que vale 0% tiene que dejar marca. Sin él se dibujaría
+     nada, que es exactamente lo que se ve cuando el dato no existe — y "no se
+     fue nadie" y "no hay con qué comparar" son cosas opuestas. */
+  .perm-col { width: 8px; flex: 0 0 8px; min-height: 2px; }
+  /* Neutra, no en gris de borde: a 8px de ancho el borde-fuerte se queda en
+     1.3:1 contra el fondo y la columna desaparece. Este es el mismo tono del
+     nombre de la promotoría, así que la fila entera habla en una sola voz. */
+  .perm-sigue { background: var(--ink-soft); }
+  /* Forma antes que color, igual que el marcador de estado: la columna de fuga
+     queda pegada al ámbar o al naranja de un Área, y bajo daltonismo protán ese
+     borde se pierde si la única diferencia es el matiz. La trama lo sostiene. */
+  .perm-deja {
+    background-color: var(--danger);
+    background-image: repeating-linear-gradient(
+      135deg, rgba(255,255,255,0.55) 0 2px, transparent 2px 4px);
+  }
+  /* Hueca: "no volvió" mide otra población (la del periodo anterior), y esa
+     distinción se lee mejor por relleno que por un tercer color. */
+  .perm-novolvio { border: 1px solid var(--danger); }
+  /* Sin referencia: la ranura vacía, dibujada a altura completa y en punteado.
+     Nunca una columna en cero ni una marca al ras del suelo — las dos se leerían
+     como "no se fue nadie", que es lo contrario de "no hay con qué comparar". */
+  .perm-sinref { height: 100%; border: 1px dashed var(--border-strong); }
+
+  .perm-leyenda {
+    display: flex; gap: 1.1rem; margin: 0 0 1.1rem;
+    font-size: 0.75rem; color: var(--ink-soft);
+  }
+  .perm-leyenda span { display: inline-flex; align-items: center; gap: 0.4rem; }
+  .perm-leyenda .perm-col { height: 13px; }
+
+  /* Plegado, el renglón del departamento es una fila más de la lista y no
+     necesita el aire de un bloque con desglose dentro. */
+  .dash-departamento { margin-bottom: 0.45rem; }
+  .dash-departamento[open] { margin-bottom: 1.5rem; }
+  .dash-departamento:not([open]) > .dep-cabecera { margin-bottom: 0; }
+  /* El departamento se pliega: con 26 promotorías la página se hacía larguísima
+     y había que bajar mucho para comparar dos áreas. Cerrado sigue mostrando su
+     propia barra y sus micro-columnas, así que plegar no esconde el dato, solo
+     el desglose. Se abre solo el que está perdiendo la mitad o más de su gente
+     (ver la plantilla): esconder justo la fila que hay que mirar sería el peor
+     resultado posible de acortar la página. */
+  .dep-cabecera {
+    list-style: none; cursor: pointer;
+    padding: 0.25rem 0.4rem; margin: 0 -0.4rem 0.55rem;
+    border-radius: var(--radius-sm);
+  }
+  .dep-cabecera::-webkit-details-marker { display: none; }
+  .dep-cabecera:hover { background: var(--surface-alt); }
+  .dep-cabecera:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .dep-chevron { flex: 0 0 auto; color: var(--ink-faint); transition: transform 0.16s ease; }
+  .dash-departamento[open] > .dep-cabecera > .dep-chevron { transform: rotate(180deg); }
+  @media (prefers-reduced-motion: reduce) { .dep-chevron { transition: none; } }
   .dash-departamento > .stat-bar-fila .stat-bar-etiqueta { font-weight: 700; }
   .dash-promotorias { margin: 0.5rem 0 0 1.4rem; padding-left: 0.9rem; border-left: 2px solid var(--border); }
   .dash-promotorias .stat-bar-fila { margin-bottom: 0.4rem; }
@@ -666,25 +732,49 @@
     margin: 0.5rem 0 0; font-size: 0.85rem; color: var(--ink-soft);
     line-height: 1.45; max-width: 62ch;
   }
-  .config-logo { display: flex; align-items: flex-start; gap: 0.9rem; }
+  /* Campo del logo. El input de archivo nativo se oculta de forma accesible y
+     la etiqueta hace de control: el widget del navegador no se puede estilar y
+     su "Sin archivos seleccionados" se cuela con la voz del sistema operativo
+     en una pantalla escrita entera por nosotros. El foco se pinta sobre la
+     etiqueta, que es lo que el usuario ve. */
+  .config-logo { display: flex; align-items: center; gap: 0.9rem; margin-bottom: 0.9rem; }
+  .config-logo .config-ayuda { margin: 0; }
   .config-logo-vista {
     width: 64px; height: 64px; object-fit: contain; flex: 0 0 auto;
     background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--radius-sm); padding: 0.35rem;
   }
-  .config-logo-texto { flex: 1 1 auto; min-width: 0; }
-  .config-logo-texto .config-ayuda { margin-top: 0; }
-  /* El widget de archivo de Django ("Actualmente… / Limpiar / Modificar:")
-     llega como texto suelto; este contenedor lo ordena en una fila. */
-  .config-archivo {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.5rem;
-    margin-top: 0.6rem; font-size: 0.85rem; color: var(--ink-soft);
+  .config-logo-file {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
   }
-  .config-archivo a { color: var(--accent); word-break: break-all; }
-  .config-archivo label { display: inline; font-size: 0.85rem; font-weight: 600; margin: 0; }
-  .config-archivo input[type="checkbox"] { width: auto; margin: 0 0.2rem 0 0; }
-  .config-archivo input[type="file"] { width: auto; flex: 1 1 14rem; margin: 0; }
-  .config-archivo br { display: none; }
+  /* Baldosa punteada de "añadir": el borde discontinuo dice ranura vacía, y se
+     vuelve sólido al pasar el cursor o al recibir el foco — la ranura se llena.
+     El punteado ya significa "todavía no" en este sistema (ver .estado). */
+  .config-logo-boton {
+    display: flex; align-items: center; justify-content: center; gap: 0.4rem;
+    width: 100%; min-height: 44px; margin: 0;
+    background: transparent; color: var(--accent);
+    border: 1px dashed var(--accent); border-radius: var(--radius-sm);
+    padding: 0.6rem 0.9rem; font-size: 0.9rem; font-weight: 700; cursor: pointer;
+    transition: background 0.15s ease, border-style 0.15s ease, color 0.15s ease;
+  }
+  .config-logo-boton:hover { background: var(--accent-soft); border-style: solid; color: var(--accent-dark); }
+  .config-logo-file:focus-visible + .config-logo-boton {
+    border-style: solid; box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  /* Con el input oculto, el nombre del archivo es la única señal de que la
+     selección funcionó; lo escribe el script de gestion_configuracion.html. */
+  .config-logo-nombre {
+    font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-soft);
+    word-break: break-all; margin: 0.5rem 0 0;
+  }
+  .config-logo-quitar {
+    display: inline-flex; align-items: center; gap: 0.35rem; margin: 0.6rem 0 0;
+    font-size: 0.82rem; font-weight: 400; color: var(--ink-soft); cursor: pointer;
+  }
+  .config-logo-quitar input { width: auto; margin: 0; }
+  .config-logo-quitar:hover { color: var(--danger); }
   .config-color { display: flex; align-items: center; gap: 0.6rem; }
   .config-color input[type="color"] {
     width: 64px; height: 40px; padding: 0.2rem; margin: 0; flex: 0 0 auto;
@@ -765,6 +855,13 @@
     .stat-bar-etiqueta { flex-basis: 96px; }
     .dash-promotorias { margin-left: 0.8rem; padding-left: 0.6rem; }
     .dash-promotorias .stat-bar-etiqueta { flex-basis: 84px; }
+    /* La micro-gráfica se estrecha antes que la pista: en un celular la pista
+       ya va justa, y ceder ahí dejaría todas las barras del mismo largo — que
+       es como no tener barra. Las columnas siguen siendo tocables porque no se
+       tocan: el desplegable es el renglón entero. */
+    .stat-bar-fila { gap: 0.55rem; }
+    .perm { margin-left: 0.5rem; gap: 2px; padding: 0 1px; }
+    .perm-col { width: 6px; flex-basis: 6px; }
     /* Filtros a ancho completo: media fila por control es demasiado estrecho
        para leer el nombre de una promotoría. */
     .filtro { flex: 1 1 100%; }

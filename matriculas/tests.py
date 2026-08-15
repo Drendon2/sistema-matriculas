@@ -12,10 +12,12 @@ y `PantallaConfiguracionTests`.
 """
 
 import math
+import re
 from datetime import date, timedelta
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.template.loader import render_to_string
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
@@ -28,7 +30,7 @@ from .models import (
     resumen_trayectoria,
 )
 from .views_gestion import (
-    RADIO_TORTA, ROL_PENDIENTE, SEPARACION_TORTA, _torta,
+    RADIO_TORTA, ROL_PENDIENTE, SEPARACION_TORTA, _stats_choices, _torta,
 )
 
 
@@ -1290,6 +1292,266 @@ class FichaUsuarioTests(TestCase):
             respuesta = self.client.get(reverse(vista))
             self.assertEqual(respuesta.status_code, 200)
             self.assertNotContains(respuesta, "/panel/usuario/")
+
+
+class EncuestaIncompletaTests(TestCase):
+    """Una encuesta a medias tiene que notarse y poder terminarse.
+
+    La migración 0016 vació `nivel_educativo` y `ocupacion` para poder pasar
+    esos campos de texto libre a listas cerradas. Las encuestas de entonces
+    quedaron incompletas, seguían contando como diligenciadas y nadie —ni la
+    persona ni el administrador— tenía forma de enterarse.
+    """
+
+    def setUp(self):
+        self.usuario = User.objects.create_user(username="antigua", password="x")
+        self.perfil = Perfil.objects.create(
+            usuario=self.usuario, nombre_completo="Encuestada Antigua",
+            fecha_nacimiento=date(1990, 5, 2), telefono="300", rol="estudiante",
+        )
+        self.encuesta = EncuestaDemografica.objects.create(
+            perfil=self.perfil, genero="f", barrio="Centro", estrato=2,
+            nivel_educativo="posgrado", ocupacion="empleado",
+            autoriza_tratamiento_datos=True,
+        )
+
+    def vaciar(self, **campos):
+        """Salta el modelo a propósito: así dejó las filas la migración 0016."""
+        EncuestaDemografica.objects.filter(pk=self.encuesta.pk).update(**campos)
+        self.encuesta.refresh_from_db()
+
+    def test_una_encuesta_entera_no_tiene_nada_pendiente(self):
+        self.assertTrue(self.encuesta.esta_completa)
+        self.assertEqual(self.encuesta.preguntas_faltantes, [])
+        self.assertFalse(self.perfil.encuesta_pendiente)
+
+    def test_nombra_las_preguntas_que_faltan(self):
+        self.vaciar(nivel_educativo="", ocupacion="")
+
+        self.assertFalse(self.encuesta.esta_completa)
+        self.assertEqual(
+            self.encuesta.preguntas_faltantes, ["nivel educativo", "ocupación"])
+
+    def test_no_autorizar_no_es_una_pregunta_sin_contestar(self):
+        """"No autorizo" es una respuesta, y el booleano en False la representa."""
+        self.vaciar(autoriza_tratamiento_datos=False)
+
+        self.assertTrue(self.encuesta.esta_completa)
+
+    def test_sin_encuesta_el_perfil_tambien_esta_pendiente(self):
+        """Para quien la tiene que llenar, no empezarla y dejarla a medias es lo mismo."""
+        self.encuesta.delete()
+        self.perfil.refresh_from_db()
+
+        self.assertTrue(self.perfil.encuesta_pendiente)
+
+    def test_mi_perfil_le_dice_a_la_persona_lo_que_le_falta(self):
+        self.vaciar(nivel_educativo="", ocupacion="")
+        self.client.force_login(self.usuario)
+
+        respuesta = self.client.get(reverse("mi_perfil"))
+
+        self.assertEqual(
+            respuesta.context["faltan_preguntas"], ["nivel educativo", "ocupación"])
+        self.assertContains(respuesta, "Incompleta")
+
+    def test_mi_perfil_no_molesta_a_quien_la_tiene_completa(self):
+        self.client.force_login(self.usuario)
+
+        respuesta = self.client.get(reverse("mi_perfil"))
+
+        self.assertEqual(respuesta.context["faltan_preguntas"], [])
+        self.assertNotContains(respuesta, "Incompleta")
+
+    def test_completarla_desde_mi_perfil_la_deja_lista(self):
+        """El arreglo de verdad: lo contesta la persona, no lo inventa nadie."""
+        self.vaciar(nivel_educativo="", ocupacion="")
+        self.client.force_login(self.usuario)
+
+        self.client.post(reverse("mi_perfil"), {
+            "accion": "encuesta",
+            "genero": "f", "barrio": "Centro", "estrato": 2,
+            "nivel_educativo": "tecnico", "ocupacion": "independiente",
+            "autoriza_tratamiento_datos": "on",
+        })
+        self.encuesta.refresh_from_db()
+
+        self.assertTrue(self.encuesta.esta_completa)
+        self.assertEqual(self.encuesta.nivel_educativo, "tecnico")
+        # Lo que ya estaba contestado no se pierde al completar el resto.
+        self.assertEqual(self.encuesta.barrio, "Centro")
+
+    def test_estadisticas_cuenta_las_incompletas(self):
+        self.vaciar(nivel_educativo="", ocupacion="")
+        admin_usuario = User.objects.create_user(username="jefa2", password="x")
+        Perfil.objects.create(
+            usuario=admin_usuario, nombre_completo="Jefa",
+            fecha_nacimiento=date(1980, 1, 1), telefono="300", rol="administrador",
+        )
+        self.client.force_login(admin_usuario)
+
+        respuesta = self.client.get(reverse("gestion_estadisticas"))
+
+        self.assertEqual(respuesta.context["encuestas_incompletas"], 1)
+        self.assertContains(respuesta, "está incompleta")
+
+
+class BarrasDeEncuestaTests(TestCase):
+    """Que una tanda de barras no pueda dibujar menos gente de la que hay.
+
+    Es la regresión de un fallo real: las barras contaban solo a quien tenía un
+    valor de la lista, así que una pregunta contestada por 2 de 5 personas se
+    dibujaba entera y nada avisaba de las otras 3. La torta ya lo hacía bien;
+    las barras no, en la misma pantalla.
+    """
+
+    CHOICES = [("a", "Opción A"), ("b", "Opción B")]
+
+    def setUp(self):
+        self.perfiles = []
+        for indice in range(3):
+            usuario = User.objects.create_user(username=f"enc{indice}", password="x")
+            self.perfiles.append(
+                Perfil.objects.create(
+                    usuario=usuario, nombre_completo=f"Encuestado {indice}",
+                    fecha_nacimiento=date(1990, 1, 1),
+                    telefono="300", rol="estudiante",
+                )
+            )
+
+    def encuestar(self, perfil, **campos):
+        return EncuestaDemografica.objects.create(
+            perfil=perfil, genero="f", estrato=2,
+            nivel_educativo="posgrado", ocupacion="empleado",
+            autoriza_tratamiento_datos=True, **campos,
+        )
+
+    def filas(self, campo="grupo_etnico"):
+        qs = EncuestaDemografica.objects.all()
+        return _stats_choices(qs, campo, self.CHOICES, qs.count())
+
+    def test_los_que_no_respondieron_salen_como_fila_propia(self):
+        self.encuestar(self.perfiles[0], grupo_etnico="a")
+        self.encuestar(self.perfiles[1])
+        self.encuestar(self.perfiles[2])
+
+        totales = {f["etiqueta"]: f["total"] for f in self.filas()}
+
+        self.assertEqual(totales["Opción A"], 1)
+        self.assertEqual(totales["Sin responder"], 2)
+
+    def test_las_barras_siempre_suman_el_total_de_encuestas(self):
+        self.encuestar(self.perfiles[0], grupo_etnico="a")
+        self.encuestar(self.perfiles[1], grupo_etnico="b")
+        self.encuestar(self.perfiles[2])
+
+        self.assertEqual(sum(f["total"] for f in self.filas()), 3)
+
+    def test_un_valor_fuera_de_la_lista_cuenta_como_sin_responder(self):
+        """El texto libre que dejó la migración 0016 no puede evaporarse.
+
+        Antes no caía en ninguna opción y tampoco en ningún hueco: la persona
+        simplemente desaparecía de la gráfica.
+        """
+        encuesta = self.encuestar(self.perfiles[0], grupo_etnico="a")
+        EncuestaDemografica.objects.filter(pk=encuesta.pk).update(grupo_etnico="Mestizo")
+
+        totales = {f["etiqueta"]: f["total"] for f in self.filas()}
+
+        self.assertEqual(totales["Opción A"], 0)
+        self.assertEqual(totales["Sin responder"], 1)
+
+    def test_sin_fila_gris_cuando_contestaron_todos(self):
+        self.encuestar(self.perfiles[0], grupo_etnico="a")
+        self.encuestar(self.perfiles[1], grupo_etnico="b")
+        self.encuestar(self.perfiles[2], grupo_etnico="b")
+
+        self.assertNotIn("Sin responder", [f["etiqueta"] for f in self.filas()])
+
+    def test_sin_total_no_se_agrega_la_fila(self):
+        """Lo que alimenta a una torta se queda crudo: la torta pone su gris.
+
+        Con la fila puesta aquí, `_torta` volvería a restar el hueco y contaría
+        dos veces a la misma gente.
+        """
+        self.encuestar(self.perfiles[0], grupo_etnico="a")
+        self.encuestar(self.perfiles[1])
+
+        crudo = _stats_choices(
+            EncuestaDemografica.objects.all(), "grupo_etnico", self.CHOICES)
+
+        self.assertNotIn("Sin responder", [f["etiqueta"] for f in crudo])
+
+    def test_la_pantalla_no_dibuja_menos_gente_de_la_que_declara(self):
+        """La comprobación de punta a punta, contra el contexto real."""
+        self.encuestar(self.perfiles[0], grupo_etnico="a", zona="urbana")
+        self.encuestar(self.perfiles[1])
+        self.encuestar(self.perfiles[2])
+
+        admin_usuario = User.objects.create_user(username="jefa", password="x")
+        admin_perfil = Perfil.objects.create(
+            usuario=admin_usuario, nombre_completo="Jefa",
+            fecha_nacimiento=date(1980, 1, 1), telefono="300", rol="administrador",
+        )
+        self.encuestar(admin_perfil)
+        self.client.force_login(admin_usuario)
+
+        contexto = self.client.get(reverse("gestion_estadisticas")).context
+        total = contexto["total_encuestas"]
+
+        for clave in [
+            "estrato_stats", "nivel_educativo_stats", "ocupacion_stats",
+            "afiliacion_salud_stats", "grupo_etnico_stats", "discapacidad_stats",
+            "victima_conflicto_stats",
+        ]:
+            with self.subTest(grafica=clave):
+                self.assertEqual(sum(f["total"] for f in contexto[clave]), total)
+
+
+class TortaRenderTests(SimpleTestCase):
+    """Que el SVG que sale diga lo que `_torta` calculó.
+
+    Regresión de un fallo real, y de los que no se ven en la aritmética: la
+    interfaz está en es-co, que escribe los decimales con coma, y en SVG la
+    coma no es un decimal sino el separador entre valores. Así,
+    `stroke-dasharray="73,4 188,5"` dejaba de ser un arco de 73.4 y pasaba a
+    ser un patrón de cuatro tramos que rellenaba casi el disco entero: la torta
+    de género se veía naranja de punta a punta con un hilo azul, aunque los
+    tests de `_torta` pasaran todos.
+    """
+
+    def dibujar(self, *pares, total_encuestas):
+        return render_to_string("matriculas/_stat_torta.html", {
+            "torta": _torta(
+                [{"etiqueta": etiqueta, "total": total} for etiqueta, total in pares],
+                total_encuestas=total_encuestas,
+            ),
+        })
+
+    def test_los_decimales_del_svg_van_con_punto(self):
+        html = self.dibujar(("Femenino", 2), ("Masculino", 3), total_encuestas=5)
+
+        self.assertIn('stroke-dasharray="73.4 188.5"', html)
+        self.assertIn('stroke-dashoffset="-75.4"', html)
+
+    def test_ningun_numero_del_svg_lleva_coma(self):
+        """La comprobación general: una coma ahí parte el atributo en dos."""
+        html = self.dibujar(
+            ("Urbana", 1), ("Rural", 1), ("Centro poblado", 0), total_encuestas=16)
+
+        for valor in re.findall(r'stroke-dash\w+="([^"]+)"', html):
+            with self.subTest(valor=valor):
+                self.assertNotIn(",", valor)
+
+    def test_el_arco_del_sector_es_proporcional_a_su_parte(self):
+        """Media torta tiene que medir media circunferencia, no un hilo."""
+        html = self.dibujar(("Femenino", 1), ("Masculino", 1), total_encuestas=2)
+
+        circunferencia = 2 * math.pi * RADIO_TORTA
+        trazos = [float(v.split()[0]) for v in re.findall(r'stroke-dasharray="([^"]+)"', html)]
+
+        for trazo in trazos:
+            self.assertAlmostEqual(trazo, circunferencia / 2 - SEPARACION_TORTA, places=1)
 
 
 class TortaTests(SimpleTestCase):
