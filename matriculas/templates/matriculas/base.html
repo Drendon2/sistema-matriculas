@@ -553,6 +553,37 @@
 
   .accion-fila { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
 
+  /* Barra de asignación en bloque. Va pegada encima de su tabla y con el mismo
+     fondo de la superficie alterna, para que se lea como la cabecera de esa
+     lista y no como un control suelto. Es pegajosa por lo mismo que los avisos:
+     con veinte estudiantes se marca abajo y el botón está arriba. */
+  .lote-barra {
+    display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+    background: var(--surface-alt); border: 1px solid var(--border);
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    border-bottom: none; padding: 0.6rem 0.85rem; margin: 1rem 0 0;
+    position: sticky; top: 3.6rem; z-index: 4;
+  }
+  .lote-cuenta {
+    font-size: 0.8rem; color: var(--ink-soft); margin-right: auto;
+    font-variant-numeric: tabular-nums;
+  }
+  .lote-barra + table { margin-top: 0; }
+  /* Deshabilitado es el estado de reposo aquí —sin nadie marcado no hay nada
+     que hacer—, así que no puede parecer un error: se atenúa, no se tacha. */
+  .lote-barra button[disabled] { opacity: 0.45; cursor: default; }
+
+  /* Mientras una acción va en camino. El contenido sigue ahí y sigue leyéndose
+     —solo deja de aceptar clics—, que es lo contrario de un spinner tapándolo
+     todo. El retardo de la transición es deliberado: en local la respuesta
+     llega en 40 ms y sin él se vería un parpadeo gris en cada clic. */
+  main[aria-busy="true"] { pointer-events: none; }
+  main[aria-busy="true"] .accion-fila, main[aria-busy="true"] form {
+    opacity: 0.55; transition: opacity 0.12s ease 0.25s;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    main[aria-busy="true"] .accion-fila, main[aria-busy="true"] form { transition: none; }
+  }
   .grupo-cabecera { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
   .grupo-cabecera .acciones { font-size: 0.8rem; display: flex; gap: 0.6rem; }
 

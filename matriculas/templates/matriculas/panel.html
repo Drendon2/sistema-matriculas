@@ -25,4 +25,68 @@
   </details>
   {% endfor %}
 {% endif %}
+
+{% comment %}
+Los adornos del lote: la casilla de "todos" y la cuenta de marcados. El lote
+funciona sin esto —se marcan las casillas a mano y se envía—, así que aquí solo
+hay comodidad, nunca reglas.
+
+Va UNA sola vez y por delegación, no dentro de `_panel_item_body.html`: ese se
+incluye una vez por promotoría y habría tantas copias del script como
+promotorías tenga el panel. Además, al repintar sin recarga los scripts del
+<main> se vuelven a ejecutar (ver base.html), y delegar en `document` es lo que
+hace que eso no acumule oyentes sobre elementos que ya no existen.
+{% endcomment %}
+<script>
+  (function () {
+    function tablaDe(casilla) {
+      return casilla.closest("table[data-lote-tabla]");
+    }
+
+    function casillasDe(tabla) {
+      return tabla ? tabla.querySelectorAll("[data-lote-fila]") : [];
+    }
+
+    function refrescar(tabla) {
+      if (!tabla) { return; }
+      var form = document.getElementById(tabla.getAttribute("data-lote-tabla"));
+      if (!form) { return; }
+
+      var todas = casillasDe(tabla);
+      var marcadas = 0;
+      todas.forEach(function (c) { if (c.checked) { marcadas++; } });
+
+      var cuenta = form.querySelector("[data-lote-cuenta]");
+      if (cuenta) {
+        cuenta.textContent = marcadas === 0 ? "Ninguno marcado"
+          : marcadas + (marcadas === 1 ? " marcado" : " marcados");
+      }
+      var boton = form.querySelector("[data-lote-enviar]");
+      if (boton) { boton.disabled = marcadas === 0; }
+
+      var todos = tabla.querySelector("[data-lote-todos]");
+      if (todos) {
+        todos.checked = marcadas > 0 && marcadas === todas.length;
+        // Ni marcada ni vacía: con la mitad seleccionada, cualquiera de los dos
+        // estados llanos diría una mentira sobre lo que va a pasar al pulsarla.
+        todos.indeterminate = marcadas > 0 && marcadas < todas.length;
+      }
+    }
+
+    document.addEventListener("change", function (evento) {
+      var origen = evento.target;
+      if (origen.matches("[data-lote-todos]")) {
+        var tabla = tablaDe(origen);
+        casillasDe(tabla).forEach(function (c) { c.checked = origen.checked; });
+        refrescar(tabla);
+      } else if (origen.matches("[data-lote-fila]")) {
+        refrescar(tablaDe(origen));
+      }
+    });
+
+    // Al cargar y después de cada repintado: el navegador conserva las casillas
+    // marcadas al volver atrás, y la cuenta tiene que reflejarlo.
+    document.querySelectorAll("table[data-lote-tabla]").forEach(refrescar);
+  })();
+</script>
 {% endblock %}

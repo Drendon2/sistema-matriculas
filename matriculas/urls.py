@@ -30,6 +30,10 @@ urlpatterns = [
     path("panel/grupos/<int:grupo_id>/clases/", views.grupo_clases, name="grupo_clases"),
     path("panel/clases/<int:clase_id>/asistencia/", views.clase_asistencia, name="clase_asistencia"),
     path("panel/matriculas/<int:matricula_id>/asignar-grupo/", views.panel_asignar_grupo, name="panel_asignar_grupo"),
+    path(
+        "panel/promotoria/<int:promotoria_id>/asignar-grupo-lote/",
+        views.panel_asignar_grupo_lote, name="panel_asignar_grupo_lote",
+    ),
     path("panel/matriculas/<int:matricula_id>/confirmar/", views.panel_confirmar_matricula, name="panel_confirmar_matricula"),
     path("panel/matriculas/<int:matricula_id>/rechazar/", views.panel_rechazar_matricula, name="panel_rechazar_matricula"),
     path("panel/promotoria/<int:promotoria_id>/cupo/", views.panel_cupo_promotoria, name="panel_cupo_promotoria"),

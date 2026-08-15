@@ -168,9 +168,38 @@
 {% if not item.sin_grupo %}
   <p class="vacio">Todos los matriculados ya tienen grupo.</p>
 {% else %}
-<table>
+
+{% if item.puede_gestionar and item.grupos %}
+{% comment %}
+Repartir es la tarea del principio de periodo y casi todos van al mismo
+horario: de a uno son veinte idas y vueltas para una decisión ya tomada.
+
+El formulario va FUERA de la tabla y las casillas lo alcanzan con el atributo
+`form`. Es lo que evita anidar formularios —cada fila ya tiene el suyo para
+mandar a uno solo—, que es HTML inválido y el navegador lo desarma a su gusto.
+{% endcomment %}
+<form action="{% url 'panel_asignar_grupo_lote' item.promotoria.id %}" method="post"
+      id="lote-{{ item.promotoria.id }}" class="lote-barra" data-lote>
+  {% csrf_token %}
+  <span class="lote-cuenta" data-lote-cuenta>Ninguno marcado</span>
+  <select name="grupo_id" style="width:auto;" required>
+    <option value="">-- elegir grupo --</option>
+    {% for g in item.grupos %}
+      <option value="{{ g.grupo.id }}">{{ g.grupo.get_nivel_display }} · {{ g.grupo.horario }} ({{ g.estudiantes|length }}/{{ g.grupo.cupo_maximo }})</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="btn btn-sm" data-lote-enviar disabled>Asignar marcados</button>
+</form>
+{% endif %}
+
+<table data-lote-tabla="lote-{{ item.promotoria.id }}">
   <thead>
     <tr>
+      {% if item.puede_gestionar and item.grupos %}
+      <th style="width:1%;">
+        <input type="checkbox" data-lote-todos aria-label="Marcar a todos los que no tienen grupo">
+      </th>
+      {% endif %}
       <th></th><th>Nombre</th><th>Edad</th><th>Teléfono</th><th>Acudiente</th>
       {% if item.puede_gestionar %}<th>Asignar a</th>{% endif %}
       {% if user.perfil.rol == "administrador" %}<th></th>{% endif %}
@@ -179,6 +208,13 @@
   <tbody>
     {% for e in item.sin_grupo %}
     <tr>
+      {% if item.puede_gestionar and item.grupos %}
+      <td>
+        <input type="checkbox" name="matricula_ids" value="{{ e.matricula.id }}"
+               form="lote-{{ item.promotoria.id }}" data-lote-fila
+               aria-label="Marcar a {{ e.perfil.nombre_completo }}">
+      </td>
+      {% endif %}
       <td>{% if e.perfil.foto_perfil %}<img class="foto-mini" src="{% url 'ver_foto' e.perfil.id %}" alt="">{% endif %}</td>
       <td>
         {% if e.perfil|ficha_visible_para:user.perfil %}

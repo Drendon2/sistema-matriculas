@@ -1076,6 +1076,80 @@ def panel_asignar_grupo(request, matricula_id):
     return redirect("panel")
 
 
+@requiere_rol(*ROLES_PANEL)
+def panel_asignar_grupo_lote(request, promotoria_id):
+    """Manda al mismo grupo a varios estudiantes de una vez.
+
+    Repartir es la tarea del principio de periodo y se hace por tandas: llegan
+    veinte matriculados y casi todos van al mismo horario. Uno por uno son
+    veinte idas y vueltas para una sola decisión ya tomada.
+
+    El lote es TODO O NADA. Si no caben, no se mete a los que quepan: dejar
+    ocho dentro y cuatro fuera obliga a averiguar a mano cuáles entraron, que
+    es justo el trabajo que esto viene a evitar. Se deshace el lote entero y se
+    dice cuántos cupos había.
+    """
+    if request.method != "POST":
+        return redirect("panel")
+
+    promotoria = get_object_or_404(Promotoria, pk=promotoria_id)
+    if not _puede_gestionar_promotoria(request.perfil, promotoria):
+        messages.error(request, "No tienes acceso a esta promotoría.")
+        return redirect("panel")
+
+    grupo_id = request.POST.get("grupo_id") or None
+    if not grupo_id:
+        messages.error(request, "Elige a qué grupo mandarlos antes de asignar.")
+        return redirect("panel")
+    grupo = get_object_or_404(Grupo, pk=grupo_id, promotoria=promotoria)
+
+    # Se filtra por promotoría y por "sin grupo" aquí y no solo en la plantilla:
+    # los ids llegan del formulario y nadie garantiza que sean los que se
+    # pintaron. Lo que no encaje simplemente no entra en el lote.
+    matriculas = list(
+        Matricula.objects.filter(
+            pk__in=request.POST.getlist("matricula_ids"),
+            promotoria=promotoria, grupo__isnull=True,
+            estado__in=Matricula.ESTADOS_INSCRITO,
+        ).select_related("estudiante", "periodo")
+    )
+    if not matriculas:
+        messages.error(request, "No marcaste a ningún estudiante.")
+        return redirect("panel")
+
+    cabian = None
+    with transaction.atomic():
+        asignadas = 0
+        for matricula in matriculas:
+            matricula.grupo = grupo
+            try:
+                # La misma puerta que usa la asignación de a uno: el cupo del
+                # grupo lo decide `Matricula.clean()`, y cuenta las que ya se
+                # guardaron en este mismo bucle.
+                matricula.full_clean()
+            except ValidationError:
+                cabian = asignadas
+                transaction.set_rollback(True)
+                break
+            matricula.save()
+            asignadas += 1
+
+    if cabian is not None:
+        messages.error(
+            request,
+            f"No caben {len(matriculas)} en {grupo}: solo quedaban {cabian} "
+            f"{'cupo' if cabian == 1 else 'cupos'}. No se asignó a nadie — manda "
+            "menos estudiantes o amplíale el cupo al grupo.",
+        )
+    else:
+        messages.success(
+            request,
+            f"{len(matriculas)} {'estudiante' if len(matriculas) == 1 else 'estudiantes'} "
+            f"{'quedó' if len(matriculas) == 1 else 'quedaron'} en {grupo}.",
+        )
+    return redirect("panel")
+
+
 # ---------------------------------------------------------------------------
 # Clases dictadas y asistencia
 #

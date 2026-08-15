@@ -3181,3 +3181,201 @@ class AccionesSinRecargaTests(TestCase):
 
         self.assertContains(respuesta, "<main>")
         self.assertContains(respuesta, "Ana Ruiz")
+
+
+class AsignacionEnLoteTests(TestCase):
+    """Mandar a varios estudiantes al mismo grupo de un solo clic.
+
+    Al principio de periodo llegan veinte matriculados y casi todos van al mismo
+    horario: de a uno son veinte idas y vueltas para una decisión ya tomada.
+
+    La regla que más se prueba aquí es que el lote sea TODO O NADA. Meter a los
+    que quepan y dejar fuera al resto suena servicial, pero deja al coordinador
+    averiguando a mano cuáles entraron —que es exactamente el trabajo que esto
+    viene a quitar.
+    """
+
+    def setUp(self):
+        self.periodo = Periodo.objects.create(
+            nombre="2026-2", fecha_inicio=date(2026, 7, 1), fecha_fin=date(2026, 12, 15),
+            activo=True, matriculas_abiertas=True,
+        )
+        self.area = Area.objects.create(nombre="Música")
+        self.profesor = self.crear_perfil("profe", "Profe Díaz", "profesor")
+        self.otro = self.crear_perfil("otro", "Otro Profe", "profesor")
+        self.violin = Promotoria.objects.create(
+            nombre="Violín", area=self.area, profesor=self.profesor,
+        )
+        self.grupo = Grupo.objects.create(
+            promotoria=self.violin, nivel="basico", horario="Lunes 4pm",
+            salon="A1", cupo_maximo=3,
+        )
+        self.url = reverse("panel_asignar_grupo_lote", args=[self.violin.id])
+
+    def crear_perfil(self, username, nombre, rol):
+        usuario = User.objects.create_user(username=username, password="x")
+        return Perfil.objects.create(
+            usuario=usuario, rol=rol, nombre_completo=nombre,
+            fecha_nacimiento=date(1990, 1, 1), telefono="3000000000",
+        )
+
+    def matricular(self, username, promotoria=None):
+        usuario = User.objects.create_user(username=username, password="x")
+        perfil = Perfil.objects.create(
+            usuario=usuario, rol="estudiante", nombre_completo=f"Est {username}",
+            fecha_nacimiento=date(1995, 3, 4), telefono="3000000000",
+        )
+        DatosEstudiante.objects.create(perfil=perfil, documento_identidad=username)
+        matricula = Matricula(
+            estudiante=perfil, promotoria=promotoria or self.violin,
+            periodo=self.periodo, estado="activa",
+        )
+        matricula.full_clean()
+        matricula.save()
+        return matricula
+
+    def asignar(self, matriculas, grupo=None, perfil=None):
+        self.client.force_login((perfil or self.profesor).usuario)
+        return self.client.post(self.url, {
+            "grupo_id": (grupo or self.grupo).id if grupo != "" else "",
+            "matricula_ids": [m.id for m in matriculas],
+        })
+
+    def avisos(self, respuesta):
+        return " ".join(str(m) for m in get_messages(respuesta.wsgi_request))
+
+    # -- el camino feliz ----------------------------------------------------
+
+    def test_tres_de_un_solo_clic(self):
+        unas = [self.matricular("a"), self.matricular("b"), self.matricular("c")]
+
+        respuesta = self.asignar(unas)
+
+        self.assertRedirects(respuesta, reverse("panel"))
+        for matricula in unas:
+            matricula.refresh_from_db()
+            self.assertEqual(matricula.grupo, self.grupo)
+
+    def test_no_toca_a_quien_no_se_marcó(self):
+        marcada = self.matricular("a")
+        libre = self.matricular("b")
+
+        self.asignar([marcada])
+
+        libre.refresh_from_db()
+        self.assertIsNone(libre.grupo)
+
+    def test_el_aviso_cuenta_a_cuántos_movió(self):
+        respuesta = self.asignar([self.matricular("a"), self.matricular("b")])
+
+        self.assertIn("2 estudiantes", self.avisos(respuesta))
+
+    def test_uno_solo_se_dice_en_singular(self):
+        respuesta = self.asignar([self.matricular("a")])
+
+        aviso = self.avisos(respuesta)
+        self.assertIn("1 estudiante ", aviso)
+        self.assertNotIn("1 estudiantes", aviso)
+
+    # -- todo o nada --------------------------------------------------------
+
+    def test_si_no_caben_todos_no_entra_ninguno(self):
+        """El grupo tiene 3 cupos y se mandan 4."""
+        cuatro = [self.matricular(n) for n in "abcd"]
+
+        self.asignar(cuatro)
+
+        for matricula in cuatro:
+            matricula.refresh_from_db()
+            self.assertIsNone(matricula.grupo, f"{matricula} entró y no debía")
+
+    def test_al_no_caber_dice_cuántos_cupos_quedaban(self):
+        """Sin la cifra, la única salida es probar de a uno hasta que falle."""
+        respuesta = self.asignar([self.matricular(n) for n in "abcd"])
+
+        aviso = self.avisos(respuesta)
+        self.assertIn("No caben 4", aviso)
+        self.assertIn("3", aviso)
+
+    def test_el_lote_cuenta_a_los_que_ya_estaban_en_el_grupo(self):
+        ya = self.matricular("a")
+        ya.grupo = self.grupo
+        ya.save()
+
+        self.asignar([self.matricular("b"), self.matricular("c"), self.matricular("d")])
+
+        self.assertEqual(
+            Matricula.objects.filter(grupo=self.grupo).count(), 1,
+            "quedaban 2 cupos para 3 estudiantes: no debió entrar nadie más",
+        )
+
+    # -- lo que no se acepta ------------------------------------------------
+
+    def test_sin_grupo_elegido_no_hace_nada(self):
+        una = self.matricular("a")
+
+        respuesta = self.asignar([una], grupo="")
+
+        una.refresh_from_db()
+        self.assertIsNone(una.grupo)
+        self.assertIn("Elige a qué grupo", self.avisos(respuesta))
+
+    def test_sin_nadie_marcado_lo_dice(self):
+        respuesta = self.asignar([])
+
+        self.assertIn("No marcaste", self.avisos(respuesta))
+
+    def test_un_profesor_ajeno_no_puede_repartir(self):
+        una = self.matricular("a")
+
+        respuesta = self.asignar([una], perfil=self.otro)
+
+        una.refresh_from_db()
+        self.assertIsNone(una.grupo)
+        self.assertIn("No tienes acceso", self.avisos(respuesta))
+
+    def test_una_matrícula_de_otra_promotoría_se_ignora(self):
+        """Los ids llegan del formulario: que estén pintados no los hace válidos."""
+        otra_promotoria = Promotoria.objects.create(
+            nombre="Guitarra", area=self.area, profesor=self.profesor)
+        colada = self.matricular("x", promotoria=otra_promotoria)
+
+        self.asignar([self.matricular("a"), colada])
+
+        colada.refresh_from_db()
+        self.assertIsNone(colada.grupo)
+
+    def test_no_arrastra_a_quien_ya_tenía_grupo(self):
+        otro_grupo = Grupo.objects.create(
+            promotoria=self.violin, nivel="intermedio", horario="Martes 5pm",
+            salon="A2", cupo_maximo=5,
+        )
+        ubicada = self.matricular("a")
+        ubicada.grupo = otro_grupo
+        ubicada.save()
+
+        self.asignar([ubicada, self.matricular("b")])
+
+        ubicada.refresh_from_db()
+        self.assertEqual(ubicada.grupo, otro_grupo, "lo movieron de grupo sin pedirlo")
+
+    def test_la_pantalla_ofrece_la_casilla_y_el_botón(self):
+        self.matricular("a")
+        self.client.force_login(self.profesor.usuario)
+
+        respuesta = self.client.get(reverse("panel"))
+
+        self.assertContains(respuesta, f'id="lote-{self.violin.id}"')
+        self.assertContains(respuesta, 'name="matricula_ids"')
+        self.assertContains(respuesta, "Asignar marcados")
+
+    def test_sin_grupos_creados_no_se_ofrece_el_lote(self):
+        """No hay adónde mandarlos: la barra sería un botón que no hace nada."""
+        sin_grupos = Promotoria.objects.create(
+            nombre="Títeres", area=self.area, profesor=self.profesor)
+        self.matricular("a", promotoria=sin_grupos)
+        self.client.force_login(self.profesor.usuario)
+
+        respuesta = self.client.get(reverse("panel"))
+
+        self.assertNotContains(respuesta, f'id="lote-{sin_grupos.id}"')
