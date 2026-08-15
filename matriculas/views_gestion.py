@@ -1,4 +1,5 @@
 import math
+from collections import Counter
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
@@ -21,6 +22,26 @@ from .views import _ficha_estudiante, requiere_rol
 ROLES_GESTION = ("director", "administrador")
 
 
+def _enumerar(piezas):
+    """["3 grupos", "41 matrículas"] -> "3 grupos y 41 matrículas"."""
+    if len(piezas) <= 1:
+        return "".join(piezas)
+    return f"{', '.join(piezas[:-1])} y {piezas[-1]}"
+
+
+def _contar_por_modelo(objetos):
+    """Instancias sueltas -> ["1 grupo", "19 matrículas"], en singular o plural."""
+    por_modelo = Counter(type(obj) for obj in objetos)
+    return [
+        "{} {}".format(
+            cuantos,
+            (modelo._meta.verbose_name if cuantos == 1
+             else modelo._meta.verbose_name_plural).lower(),
+        )
+        for modelo, cuantos in por_modelo.items()
+    ]
+
+
 class RolGestionRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
     """Solo director/administrador pueden gestionar el catálogo académico."""
 
@@ -36,18 +57,32 @@ class RolGestionRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
 
 
 class BorradoProtegidoMixin:
-    """Convierte un ProtectedError (hay registros dependientes) en un mensaje amable."""
+    """Convierte un ProtectedError (hay registros dependientes) en un mensaje amable.
+
+    El destino sale de `get_success_url()`, no del atributo `success_url`: la
+    mitad de las vistas que usan este mixin lo calculan (volver al área, volver
+    a la promotoría) y dejan el atributo en None. Redirigir por el atributo
+    reventaba con TypeError justo en el camino de recuperación, así que quien
+    intentaba borrar algo protegido no veía el aviso sino un error 500 — el
+    borrado se impedía bien, pero parecía que el sistema se había roto.
+    """
 
     def form_valid(self, form):
         try:
             return super().form_valid(form)
-        except ProtectedError:
-            messages.error(
-                self.request,
-                f"No se puede eliminar «{self.object}»: hay otros registros que dependen de él "
-                "(por ejemplo grupos o matrículas asociadas).",
-            )
-            return redirect(self.success_url)
+        except ProtectedError as error:
+            messages.error(self.request, self.aviso_de_protegido(error))
+            return redirect(self.get_success_url())
+
+    def aviso_de_protegido(self, error):
+        """Nombra y cuenta lo que está estorbando, en vez de decir «algo depende»."""
+        # "todavía tiene …" en vez de "… depende de él": el sujeto puede ser una
+        # promotoría, un área o un periodo, y así el aviso no tiene que
+        # concordar en género con nada.
+        return (
+            f"No se puede eliminar «{self.object}»: todavía tiene "
+            f"{_enumerar(_contar_por_modelo(error.protected_objects))}."
+        )
 
 
 class GestionInicioView(RolGestionRequiredMixin, TemplateView):

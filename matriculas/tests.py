@@ -17,6 +17,7 @@ from datetime import date, timedelta
 from io import StringIO
 
 from django.contrib.auth.models import User
+from django.contrib.messages import get_messages
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
@@ -2759,3 +2760,142 @@ class GestionVeElRegistroTests(TestCase):
 
         self.assertContains(respuesta, destino)
         self.assertEqual(self.client.get(destino).status_code, 200)
+
+
+class BorradoProtegidoTests(TestCase):
+    """Borrar algo del catálogo que todavía sostiene registros.
+
+    El sistema hace bien lo importante —no deja borrar una promotoría con
+    matrículas encima, porque eso se llevaría por delante el historial de los
+    estudiantes—, pero durante un tiempo el AVISO de que no se puede era lo que
+    reventaba: `BorradoProtegidoMixin` redirigía usando el atributo
+    `success_url`, que en las vistas de promotoría y de grupo vale None porque
+    calculan su destino con `get_success_url()`. El resultado era un 500 en el
+    camino de recuperación: se veía como si el sistema se hubiera roto, no como
+    una regla.
+
+    De ahí que estas pruebas insistan en las dos vistas que lo calculan: son
+    justo las que el atributo no cubría.
+    """
+
+    def setUp(self):
+        self.periodo = Periodo.objects.create(
+            nombre="2026-2", fecha_inicio=date(2026, 7, 1), fecha_fin=date(2026, 12, 15),
+            activo=True, matriculas_abiertas=True,
+        )
+        self.area = Area.objects.create(nombre="Teatro")
+        self.titeres = Promotoria.objects.create(nombre="Títeres", area=self.area)
+        self.grupo = Grupo.objects.create(
+            promotoria=self.titeres, nivel="basico", horario="Martes 3pm",
+            salon="B2", cupo_maximo=10,
+        )
+
+        usuario = User.objects.create_user(username="dire", password="x")
+        self.director = Perfil.objects.create(
+            usuario=usuario, rol="director", nombre_completo="Directora",
+            fecha_nacimiento=date(1980, 1, 1), telefono="3000000009",
+        )
+        self.client.force_login(self.director.usuario)
+
+    def matricular(self, username="ana"):
+        usuario = User.objects.create_user(username=username, password="x")
+        perfil = Perfil.objects.create(
+            usuario=usuario, rol="estudiante", nombre_completo="Ana Ruiz",
+            fecha_nacimiento=date(1995, 3, 4), telefono="3000000000",
+        )
+        DatosEstudiante.objects.create(perfil=perfil, documento_identidad=username)
+        matricula = Matricula(
+            estudiante=perfil, promotoria=self.titeres, periodo=self.periodo,
+            grupo=self.grupo, estado="activa",
+        )
+        matricula.full_clean()
+        matricula.save()
+        return matricula
+
+    def avisos(self, respuesta):
+        return [str(m) for m in get_messages(respuesta.wsgi_request)]
+
+    # -- promotoría ---------------------------------------------------------
+
+    def test_borrar_una_promotoria_con_matrículas_avisa_en_vez_de_reventar(self):
+        """La prueba de regresión del 500: antes reventaba aquí mismo."""
+        self.matricular()
+
+        respuesta = self.client.post(
+            reverse("promotoria_eliminar", args=[self.titeres.id]))
+
+        self.assertEqual(respuesta.status_code, 302)
+        self.assertTrue(Promotoria.objects.filter(pk=self.titeres.pk).exists())
+
+    def test_el_aviso_dice_qué_está_estorbando(self):
+        """Con "algo depende de esto" toca ir a buscar qué; con la cuenta, no."""
+        self.matricular()
+
+        respuesta = self.client.post(
+            reverse("promotoria_eliminar", args=[self.titeres.id]))
+
+        aviso = " ".join(self.avisos(respuesta))
+        self.assertIn("Títeres", aviso)
+        self.assertIn("1 matrícula", aviso)
+
+    def test_el_aviso_pluraliza_segun_cuántos_haya(self):
+        self.matricular("ana")
+        self.matricular("beto")
+
+        aviso = " ".join(self.avisos(self.client.post(
+            reverse("promotoria_eliminar", args=[self.titeres.id]))))
+
+        self.assertIn("2 matrículas", aviso)
+        self.assertNotIn("2 matrícula ", aviso)
+
+    def test_la_redirección_lleva_al_área_donde_se_estaba(self):
+        """Devolver a la lista general obligaría a volver a bajar hasta aquí."""
+        self.matricular()
+
+        respuesta = self.client.post(
+            reverse("promotoria_eliminar", args=[self.titeres.id]))
+
+        self.assertRedirects(
+            respuesta, reverse("promotorias_por_area", args=[self.area.id]))
+
+    def test_una_promotoria_sin_nada_encima_sí_se_borra(self):
+        """La regla es proteger lo que sostiene registros, no prohibir borrar."""
+        vacia = Promotoria.objects.create(nombre="Mimo", area=self.area)
+
+        self.client.post(reverse("promotoria_eliminar", args=[vacia.id]))
+
+        self.assertFalse(Promotoria.objects.filter(pk=vacia.pk).exists())
+
+    def test_sin_matrículas_los_grupos_se_van_con_la_promotoría(self):
+        """Los grupos son CASCADE, no PROTECT: mientras nadie esté matriculado
+        son un horario sin gente y se borran con ella. Queda escrito porque no
+        se adivina desde la pantalla —no hay aviso— y porque es justo lo que
+        deja de ser cierto en cuanto entra la primera matrícula."""
+        self.assertTrue(Grupo.objects.filter(pk=self.grupo.pk).exists())
+
+        self.client.post(reverse("promotoria_eliminar", args=[self.titeres.id]))
+
+        self.assertFalse(Promotoria.objects.filter(pk=self.titeres.pk).exists())
+        self.assertFalse(Grupo.objects.filter(pk=self.grupo.pk).exists())
+
+    # -- grupo --------------------------------------------------------------
+
+    def test_borrar_un_grupo_con_matrículas_también_avisa(self):
+        """La otra vista que calcula su destino, y por eso fallaba igual."""
+        self.matricular()
+
+        respuesta = self.client.post(reverse("grupo_eliminar", args=[self.grupo.id]))
+
+        self.assertRedirects(
+            respuesta, reverse("grupos_por_promotoria", args=[self.titeres.id]))
+        self.assertTrue(Grupo.objects.filter(pk=self.grupo.pk).exists())
+        self.assertIn("1 matrícula", " ".join(self.avisos(respuesta)))
+
+    # -- área ---------------------------------------------------------------
+
+    def test_borrar_un_área_con_promotorías_sigue_avisando(self):
+        """Esta usa el atributo `success_url` y ya funcionaba: que siga."""
+        respuesta = self.client.post(reverse("area_eliminar", args=[self.area.id]))
+
+        self.assertRedirects(respuesta, reverse("area_lista"))
+        self.assertIn("1 promotoría", " ".join(self.avisos(respuesta)))
