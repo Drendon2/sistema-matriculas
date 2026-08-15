@@ -106,6 +106,7 @@
       <th>Nombre</th>
       <th>Usuario</th>
       <th>Rol</th>
+      <th>Promotorías</th>
       <th>Estado</th>
       <th></th>
     </tr>
@@ -127,6 +128,23 @@
         {% else %}
           <span class="estado estado-pendiente">Pendiente de rol</span>
         {% endif %}
+      </td>
+      {% comment %}
+      Una misma columna para dos vínculos distintos: quien DICTA la promotoría y
+      quien está MATRICULADO en ella. Se lee igual en la lista —"a qué anda
+      vinculada esta persona"— y separarlas en dos columnas dejaría cada una
+      medio vacía, porque ninguna persona tiene las dos.
+      {% endcomment %}
+      <td>
+        {% for p in perfil.promotorias_dictadas.all %}
+          <span class="tag-dot {{ p.area|tag_color }}"></span>{{ p.nombre }}{% if not forloop.last %}<br>{% endif %}
+        {% empty %}
+          {% for m in perfil.matriculas_visibles %}
+            <span class="tag-dot {{ m.promotoria.area|tag_color }}"></span>{{ m.promotoria.nombre }}{% if not forloop.last %}<br>{% endif %}
+          {% empty %}
+            <span class="vacio">—</span>
+          {% endfor %}
+        {% endfor %}
       </td>
       <td>
         {% if perfil.usuario.is_active %}

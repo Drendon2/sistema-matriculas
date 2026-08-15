@@ -6,7 +6,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Prefetch, Q
 from django.db.models.deletion import Collector, ProtectedError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
@@ -1194,7 +1194,20 @@ class UsuarioListView(RolGestionRequiredMixin, ListView):
         # Los pendientes de rol (rol="") quedan primero para que no se pierdan de vista.
         sel = self.seleccion = self._seleccion()
 
-        qs = Perfil.objects.select_related("usuario").order_by("rol", "nombre_completo")
+        # La columna "Promotorías" resuelve los dos vínculos de una vez. Va en
+        # prefetch y no en la plantilla a pelo porque, con doscientos usuarios,
+        # preguntarlo fila por fila son cuatrocientas consultas.
+        vinculadas = Matricula.objects.exclude(estado="retirada").select_related(
+            "promotoria", "promotoria__area")
+        if sel["periodo"] is not None:
+            vinculadas = vinculadas.filter(periodo=sel["periodo"])
+        qs = Perfil.objects.select_related("usuario").prefetch_related(
+            Prefetch(
+                "promotorias_dictadas",
+                queryset=Promotoria.objects.select_related("area").order_by("nombre"),
+            ),
+            Prefetch("matriculas", queryset=vinculadas, to_attr="matriculas_visibles"),
+        ).order_by("rol", "nombre_completo")
 
         if sel["rol"] == ROL_PENDIENTE:
             qs = qs.filter(rol="")

@@ -3942,3 +3942,70 @@ class CatalogoOpcionalTests(TestCase):
         """Una instalación nueva no debería tener que ir a activarlo."""
         self.assertTrue(
             ConfiguracionInstitucion.actual().promotorias_visibles_para_estudiantes)
+
+
+class ColumnaPromotoriasUsuariosTests(TestCase):
+    """En Gestión → Usuarios se ve a qué promotoría está vinculada cada persona.
+
+    Una sola columna para dos vínculos distintos —quien la DICTA y quien está
+    MATRICULADO—, porque en la lista se leen igual: "a qué anda vinculada esta
+    persona". Nadie tiene los dos, así que dos columnas quedarían medio vacías.
+    """
+
+    def setUp(self):
+        self.periodo = Periodo.objects.create(
+            nombre="2026-2", fecha_inicio=date(2026, 7, 1), fecha_fin=date(2026, 12, 15),
+            activo=True, matriculas_abiertas=True,
+        )
+        area = Area.objects.create(nombre="Música")
+        self.profesor = self.crear("profe", "profesor", "Profe Díaz")
+        self.director = self.crear("dire", "director", "Directora")
+        self.violin = Promotoria.objects.create(
+            nombre="Violín", area=area, profesor=self.profesor)
+        self.coro = Promotoria.objects.create(nombre="Coro", area=area)
+        self.ana = self.crear("ana", "estudiante", "Ana Ruiz")
+        DatosEstudiante.objects.create(perfil=self.ana, documento_identidad="111")
+        self.client.force_login(self.director.usuario)
+
+    def crear(self, username, rol, nombre):
+        usuario = User.objects.create_user(username=username, password="x")
+        return Perfil.objects.create(
+            usuario=usuario, rol=rol, nombre_completo=nombre,
+            fecha_nacimiento=date(1995, 3, 4), telefono="3000000000")
+
+    def matricular(self, promotoria, estado="activa"):
+        matricula = Matricula(
+            estudiante=self.ana, promotoria=promotoria, periodo=self.periodo, estado=estado)
+        matricula.full_clean()
+        matricula.save()
+        return matricula
+
+    def test_del_profesor_se_ve_la_que_dicta(self):
+        respuesta = self.client.get(reverse("usuario_lista") + "?rol=profesor")
+
+        self.assertContains(respuesta, "Violín")
+
+    def test_del_estudiante_se_ve_en_la_que_esta_matriculado(self):
+        self.matricular(self.coro)
+
+        respuesta = self.client.get(reverse("usuario_lista") + "?rol=estudiante")
+
+        self.assertContains(respuesta, "Coro")
+
+    def test_una_matricula_retirada_no_cuenta_como_vinculo(self):
+        """Retirarse es dejar de pertenecer; la fila se conserva por el
+        historial, pero la columna dice dónde está la persona AHORA.
+
+        Se mira el vínculo y no la página: "Coro" también aparece en el
+        desplegable del filtro, que lista el catálogo entero."""
+        self.matricular(self.coro, estado="retirada")
+
+        respuesta = self.client.get(reverse("usuario_lista") + "?rol=estudiante")
+
+        fila = next(p for p in respuesta.context["object_list"] if p.id == self.ana.id)
+        self.assertEqual(fila.matriculas_visibles, [])
+
+    def test_la_columna_existe_en_la_cabecera(self):
+        respuesta = self.client.get(reverse("usuario_lista"))
+
+        self.assertContains(respuesta, "<th>Promotorías</th>", html=False)
