@@ -2899,3 +2899,92 @@ class BorradoProtegidoTests(TestCase):
 
         self.assertRedirects(respuesta, reverse("area_lista"))
         self.assertIn("1 promotoría", " ".join(self.avisos(respuesta)))
+
+    # -- avisar ANTES, no después -------------------------------------------
+    #
+    # Impedir el borrado y avisar bien no basta si el aviso llega cuando ya se
+    # pulsó "Sí, eliminar": la lista decía «Títeres — 0 grupos» (los grupos no
+    # son lo que protege), la pantalla preguntaba "¿seguro? no se puede
+    # deshacer", y solo entonces contestaba que no. Tres pantallas mintiendo en
+    # fila. Estas pruebas fijan que la respuesta se sepa desde la primera.
+
+    def test_la_pantalla_de_confirmación_no_pregunta_si_ya_sabe_que_no(self):
+        self.matricular()
+
+        respuesta = self.client.get(
+            reverse("promotoria_eliminar", args=[self.titeres.id]))
+
+        self.assertContains(respuesta, "No se puede eliminar")
+        self.assertContains(respuesta, "1 matrícula")
+        self.assertNotContains(respuesta, "Sí, eliminar")
+
+    def test_sin_nada_que_lo_impida_la_confirmación_sigue_preguntando(self):
+        vacia = Promotoria.objects.create(nombre="Mimo", area=self.area)
+
+        respuesta = self.client.get(reverse("promotoria_eliminar", args=[vacia.id]))
+
+        self.assertContains(respuesta, "Sí, eliminar")
+        self.assertNotContains(respuesta, "No se puede eliminar")
+
+    def test_la_confirmación_dice_qué_se_va_a_llevar_por_delante(self):
+        """Los grupos caen en cascada sin preguntar. "No se puede deshacer" a
+        secas no dice que además se lleva cosas."""
+        respuesta = self.client.get(
+            reverse("promotoria_eliminar", args=[self.titeres.id]))
+
+        self.assertContains(respuesta, "Sí, eliminar")
+        self.assertContains(respuesta, "1 grupo")
+
+    def test_la_simulación_no_borra_nada(self):
+        """Pintar la pantalla no puede tener efectos: se pide el recuento dos
+        veces y la promotoría vacía sigue ahí."""
+        vacia = Promotoria.objects.create(nombre="Mimo", area=self.area)
+
+        self.client.get(reverse("promotoria_eliminar", args=[vacia.id]))
+        self.client.get(reverse("promotoria_eliminar", args=[vacia.id]))
+
+        self.assertTrue(Promotoria.objects.filter(pk=vacia.pk).exists())
+        self.assertTrue(Grupo.objects.filter(pk=self.grupo.pk).exists())
+
+    # -- la lista tampoco puede prometer lo que no ---------------------------
+
+    def test_la_lista_no_ofrece_eliminar_lo_que_no_se_puede(self):
+        self.matricular()
+
+        respuesta = self.client.get(
+            reverse("promotorias_por_area", args=[self.area.id]))
+
+        self.assertNotContains(
+            respuesta, reverse("promotoria_eliminar", args=[self.titeres.id]))
+
+    def test_la_lista_dice_cuántas_matrículas_lo_están_reteniendo(self):
+        """«0 grupos» se lee como vacía; el historial es lo que la retiene."""
+        self.matricular()
+
+        respuesta = self.client.get(
+            reverse("promotorias_por_area", args=[self.area.id]))
+
+        self.assertContains(respuesta, "1 matrículas en historial")
+
+    def test_la_lista_sí_ofrece_eliminar_lo_que_está_libre(self):
+        vacia = Promotoria.objects.create(nombre="Mimo", area=self.area)
+
+        respuesta = self.client.get(
+            reverse("promotorias_por_area", args=[self.area.id]))
+
+        self.assertContains(respuesta, reverse("promotoria_eliminar", args=[vacia.id]))
+
+    def test_una_matrícula_retirada_retiene_igual_que_una_activa(self):
+        """El cupo se libera al retirarse, pero la fila no se borra —es el
+        historial— y sigue siendo PROTECT. La lista tiene que contarla."""
+        matricula = self.matricular()
+        matricula.estado = "retirada"
+        matricula.grupo = None
+        matricula.save(update_fields=["estado", "grupo"])
+
+        respuesta = self.client.get(
+            reverse("promotorias_por_area", args=[self.area.id]))
+
+        self.assertContains(respuesta, "1 matrículas en historial")
+        self.assertNotContains(
+            respuesta, reverse("promotoria_eliminar", args=[self.titeres.id]))

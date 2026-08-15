@@ -7,7 +7,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
-from django.db.models.deletion import ProtectedError
+from django.db.models.deletion import Collector, ProtectedError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.views.generic import CreateView, DeleteView, ListView, TemplateView, UpdateView
@@ -42,6 +42,29 @@ def _contar_por_modelo(objetos):
     ]
 
 
+def _simular_borrado(objeto):
+    """Qué impediría borrar `objeto` y qué se iría con él, sin tocar la base.
+
+    Es el mismo recuento que hará el borrado de verdad: el ProtectedError salta
+    al RECOLECTAR lo que caería, no al escribir, así que preguntarlo antes da
+    exactamente la misma respuesta que dará el POST. De ahí que la pantalla de
+    confirmación pueda decir la verdad antes de que nadie pulse nada, en vez de
+    preguntar «¿seguro?» para negarse después.
+    """
+    collector = Collector(using=objeto._state.db)
+    try:
+        collector.collect([objeto])
+    except ProtectedError as error:
+        return list(error.protected_objects), []
+    arrastre = [
+        hijo
+        for instancias in collector.data.values()
+        for hijo in instancias
+        if hijo != objeto
+    ]
+    return [], arrastre
+
+
 class RolGestionRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
     """Solo director/administrador pueden gestionar el catálogo académico."""
 
@@ -67,7 +90,19 @@ class BorradoProtegidoMixin:
     borrado se impedía bien, pero parecía que el sistema se había roto.
     """
 
+    def get_context_data(self, **kwargs):
+        """Lo que la pantalla necesita para no preguntar en vano."""
+        contexto = super().get_context_data(**kwargs)
+        bloqueos, arrastre = _simular_borrado(self.object)
+        contexto["bloqueos"] = _enumerar(_contar_por_modelo(bloqueos))
+        contexto["arrastre"] = _enumerar(_contar_por_modelo(arrastre))
+        return contexto
+
     def form_valid(self, form):
+        # La pantalla ya avisa antes de preguntar, así que aquí no debería
+        # llegar nadie. Se queda igual porque el botón no es la única forma de
+        # enviar este POST, y porque entre que se pinta la página y se pulsa
+        # puede entrar una matrícula nueva.
         try:
             return super().form_valid(form)
         except ProtectedError as error:
@@ -834,11 +869,16 @@ class PromotoriaListView(RolGestionRequiredMixin, ListView):
         # solo las promotorías tienen profesor, así que va por bandera y no
         # metido en la plantilla para todos.
         "mostrar_profesor": True,
+        "etiqueta_protegido": "matrículas",
     }
 
     def get_queryset(self):
         return Promotoria.objects.select_related("area", "profesor").annotate(
-            total_hijos=Count("grupos", distinct=True)
+            total_hijos=Count("grupos", distinct=True),
+            # Las matrículas son PROTECT y ninguna se borra al terminar el
+            # periodo, así que aquí van TODAS —retiradas incluidas—: son
+            # exactamente las que harán fallar el borrado.
+            total_protegido=Count("matriculas", distinct=True),
         ).order_by("area__nombre", "nombre")
 
 
@@ -850,7 +890,8 @@ class PromotoriasPorAreaView(RolGestionRequiredMixin, ListView):
     def get_queryset(self):
         self.area = get_object_or_404(Area, pk=self.kwargs["area_id"])
         return Promotoria.objects.filter(area=self.area).select_related("profesor").annotate(
-            total_hijos=Count("grupos", distinct=True)
+            total_hijos=Count("grupos", distinct=True),
+            total_protegido=Count("matriculas", distinct=True),
         ).order_by("nombre")
 
     def get_context_data(self, **kwargs):
@@ -860,6 +901,7 @@ class PromotoriasPorAreaView(RolGestionRequiredMixin, ListView):
             "url_nuevo": "promotoria_nueva", "url_editar": "promotoria_editar", "url_eliminar": "promotoria_eliminar",
             "url_fila": "grupos_por_promotoria", "etiqueta_singular": "grupo", "etiqueta_plural": "grupos",
             "mostrar_profesor": True,
+            "etiqueta_protegido": "matrículas",
             "preset_campo": "area", "preset_valor": self.area.pk,
             "migas": [{"texto": "Departamentos", "url": reverse("area_lista")}],
         })
@@ -920,11 +962,16 @@ class GrupoListView(RolGestionRequiredMixin, ListView):
     extra_context = {
         "titulo": "Grupos", "url_nuevo": "grupo_nuevo", "url_editar": "grupo_editar", "url_eliminar": "grupo_eliminar",
         "url_fila": "grupo_estudiantes", "etiqueta_singular": "estudiante", "etiqueta_plural": "estudiantes",
+        "etiqueta_protegido": "matrículas",
     }
 
     def get_queryset(self):
         return Grupo.objects.select_related("promotoria", "promotoria__area").annotate(
-            total_hijos=Count("matriculas", distinct=True, filter=Q(matriculas__estado="activa"))
+            total_hijos=Count("matriculas", distinct=True, filter=Q(matriculas__estado="activa")),
+            # Ojo a la diferencia con la de arriba: la de al lado del nombre
+            # cuenta estudiantes ACTIVOS, y un grupo del que todos se retiraron
+            # muestra cero y aun así no se deja borrar. Esta cuenta todas.
+            total_protegido=Count("matriculas", distinct=True),
         ).order_by("promotoria__area__nombre", "promotoria__nombre", "nivel")
 
 
@@ -936,7 +983,8 @@ class GruposPorPromotoriaView(RolGestionRequiredMixin, ListView):
     def get_queryset(self):
         self.promotoria = get_object_or_404(Promotoria.objects.select_related("area"), pk=self.kwargs["promotoria_id"])
         return Grupo.objects.filter(promotoria=self.promotoria).annotate(
-            total_hijos=Count("matriculas", distinct=True, filter=Q(matriculas__estado="activa"))
+            total_hijos=Count("matriculas", distinct=True, filter=Q(matriculas__estado="activa")),
+            total_protegido=Count("matriculas", distinct=True),
         ).order_by("nivel")
 
     def get_context_data(self, **kwargs):
@@ -945,6 +993,7 @@ class GruposPorPromotoriaView(RolGestionRequiredMixin, ListView):
             "titulo": f"Grupos de {self.promotoria.nombre}",
             "url_nuevo": "grupo_nuevo", "url_editar": "grupo_editar", "url_eliminar": "grupo_eliminar",
             "url_fila": "grupo_estudiantes", "etiqueta_singular": "estudiante", "etiqueta_plural": "estudiantes",
+            "etiqueta_protegido": "matrículas",
             "preset_campo": "promotoria", "preset_valor": self.promotoria.pk,
             "migas": [
                 {"texto": "Departamentos", "url": reverse("area_lista")},

@@ -4,13 +4,46 @@
 
 {% block content %}
 <div class="card" style="max-width:480px;">
+{% if bloqueos %}
+  {% comment %}
+  Preguntar «¿seguro?» para negarse después es hacer perder el viaje: quien
+  llegó hasta aquí ya decidió, y la respuesta se sabía antes de pintar la
+  página. Así que aquí no hay pregunta ni botón de eliminar — solo el porqué y
+  la salida.
+  {% endcomment %}
+  <h2>No se puede eliminar «{{ object }}»</h2>
+  <p>
+    Todavía tiene <strong>{{ bloqueos }}</strong>. Borrarlo se llevaría por
+    delante ese historial, así que el sistema no lo permite.
+  </p>
+  <p class="campo-info">
+    Si ya no se va a ofrecer, ponle <strong>cupo 0</strong> en el periodo nuevo
+    en vez de borrarlo: nadie se puede matricular y lo ya cursado se conserva.
+  </p>
+  <p style="margin-bottom:0;">
+    <a href="{% url url_lista %}" class="btn btn-secundario">Volver</a>
+  </p>
+{% else %}
   <h2>¿Eliminar «{{ object }}»?</h2>
+  {% if arrastre %}
+  {% comment %}
+  "No se puede deshacer" a secas se queda corto cuando además arrastra cosas:
+  los grupos cuelgan en cascada y se van sin preguntar, y con ellos las clases
+  dictadas. Decir cuántos son es lo que hace que la confirmación signifique
+  algo.
+  {% endcomment %}
+  <p class="campo-info" style="margin-top:-0.6rem;">
+    Se llevará también <strong>{{ arrastre }}</strong>. No se puede deshacer.
+  </p>
+  {% else %}
   <p class="campo-info" style="margin-top:-0.6rem;">Esta acción no se puede deshacer.</p>
+  {% endif %}
 
   <form method="post" style="display:flex;gap:0.6rem;">
     {% csrf_token %}
     <button type="submit" class="btn btn-retirar">Sí, eliminar</button>
     <a href="{% url url_lista %}" class="btn btn-secundario">Cancelar</a>
   </form>
+{% endif %}
 </div>
 {% endblock %}

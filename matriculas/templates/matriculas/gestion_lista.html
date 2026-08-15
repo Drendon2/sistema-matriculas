@@ -25,6 +25,7 @@
         {% if mostrar_tag_area %}<span class="tag-dot {{ obj|tag_color }}"></span>{% endif %}
         {% if url_fila %}<a href="{% url url_fila obj.pk %}">{{ obj }}</a>{% else %}{{ obj }}{% endif %}
         {% if etiqueta_plural %}<span class="campo-info" style="margin:0;display:inline;">— {{ obj.total_hijos }} {% if obj.total_hijos == 1 %}{{ etiqueta_singular }}{% else %}{{ etiqueta_plural }}{% endif %}</span>{% endif %}
+        {% if obj.total_protegido %}<span class="campo-info" style="margin:0;display:inline;">· {{ obj.total_protegido }} {{ etiqueta_protegido }} en historial</span>{% endif %}
         {% comment %}
           Quién dicta, en su propio renglón: esta lista es la de un catálogo y
           en ella "sin asignar" no es un hueco cosmético — es la promotoría en
@@ -45,7 +46,21 @@
       <td style="text-align:right;white-space:nowrap;">
         <a href="{% url url_editar obj.pk %}">Editar</a>
         &nbsp;·&nbsp;
-        <a href="{% url url_eliminar obj.pk %}" style="color:var(--danger);">Eliminar</a>
+        {% comment %}
+          Lo que se cuenta al lado del nombre (grupos, estudiantes activos) no
+          es lo que impide borrar: «Títeres — 0 grupos» se lee como vacía y
+          resulta que sostiene diecinueve matrículas, retiradas incluidas. Con
+          el enlace en rojo ahí puesto, la única forma de enterarse era pulsarlo
+          y que te lo negaran. Aquí ya no es un enlace, y dice por qué.
+        {% endcomment %}
+        {% if obj.total_protegido %}
+          <span class="campo-info" style="margin:0;display:inline;"
+                title="No se puede eliminar: tiene {{ obj.total_protegido }} {{ etiqueta_protegido }} en su historial.">
+            Eliminar
+          </span>
+        {% else %}
+          <a href="{% url url_eliminar obj.pk %}" style="color:var(--danger);">Eliminar</a>
+        {% endif %}
       </td>
     </tr>
     {% endfor %}
