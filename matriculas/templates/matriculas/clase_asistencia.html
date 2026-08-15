@@ -1,0 +1,112 @@
+{% extends "matriculas/base.html" %}
+{% load matriculas_extras %}
+
+{% block title %}Asistencia — {{ clase.grupo }}{% endblock %}
+
+{% block content %}
+<p class="migas">
+  <a href="{% url 'panel' %}">Panel</a><span class="migas-sep">/</span>
+  <a href="{% url 'grupo_clases' clase.grupo.id %}">{{ clase.grupo.promotoria.nombre }} · {{ clase.grupo.get_nivel_display }}</a><span class="migas-sep">/</span>
+  <span class="migas-actual">Clase del {{ clase.fecha_hora|date:"j \d\e F" }}</span>
+</p>
+
+<h2>Asistencia</h2>
+<p class="campo-info">
+  <span class="tag-dot {{ clase.grupo.promotoria.area|tag_color }}"></span>{{ clase.grupo.promotoria.nombre }} ·
+  {{ clase.grupo.get_nivel_display }} · {{ clase.grupo.horario }} · Salón {{ clase.grupo.salon }}
+</p>
+
+{# La hora es el dato que el botón existe para capturar: va en monoespaciada, como toda cifra del sistema. #}
+<p class="clase-sello">
+  Clase registrada el <strong>{{ clase.fecha_hora|date:"l j \d\e F \d\e Y" }}</strong>
+  a las <span class="clase-hora">{{ clase.fecha_hora|time:"H:i" }}</span>
+  {% if clase.registrada_por %}por {{ clase.registrada_por.nombre_completo }}{% endif %}
+</p>
+
+{% comment %}
+  Cuántas confirmaciones lleva, nunca quién las dio (ver la vista): el número
+  dice si la clase ya quedó verificada, y la lista de nombres convertiría la
+  verificación en algo que reclamarle a cada estudiante.
+{% endcomment %}
+<p class="clase-sello" style="margin-top:-0.8rem;">
+  {% if verificada %}
+    <span class="estado estado-activa">Verificada</span>
+    La confirmaron {{ confirmaciones }} estudiante{{ confirmaciones|pluralize }}.
+  {% elif vencida %}
+    <span class="estado estado-retirada">Sin verificar</span>
+    El plazo cerró el {{ limite_confirmacion|date:"j \d\e F" }} a las
+    <span class="clase-hora">{{ limite_confirmacion|time:"H:i" }}</span>
+    con {{ confirmaciones }} de {{ requeridas }} confirmaciones.
+  {% elif requeridas %}
+    <span class="estado estado-pendiente">{{ confirmaciones }} de {{ requeridas }}</span>
+    Tus estudiantes pueden confirmarla hasta el {{ limite_confirmacion|date:"l j" }} a las
+    <span class="clase-hora">{{ limite_confirmacion|time:"H:i" }}</span>.
+  {% else %}
+    Cuando la clase se registró no había nadie inscrito en el grupo, así que no hay quién la confirme.
+  {% endif %}
+</p>
+
+{% if not estudiantes %}
+  <p class="vacio">Este grupo no tiene estudiantes inscritos, así que no hay lista que pasar.</p>
+{% else %}
+  {% if sin_pasar %}
+    <p class="campo-info">Falta{{ sin_pasar|pluralize:"n" }} {{ sin_pasar }} de {{ estudiantes|length }} por marcar.</p>
+  {% endif %}
+
+  <form method="post" class="card asistencia-lista" id="form-asistencia">
+    {% csrf_token %}
+    {% for e in estudiantes %}
+    <div class="asistencia-fila">
+      <span class="asistencia-nombre">
+        {% if e.perfil.foto_perfil %}<img class="foto-mini" src="{% url 'ver_foto' e.perfil.id %}" alt="">{% endif %}
+        {% if e.perfil|ficha_visible_para:user.perfil %}
+          <a href="{% url 'detalle_usuario' e.perfil.id %}">{{ e.perfil.nombre_completo }}</a>
+        {% else %}{{ e.perfil.nombre_completo }}{% endif %}
+        {% if e.cancelacion %}<span class="estado estado-cancelacion_solicitada">Pidió cancelar</span>{% endif %}
+      </span>
+      <span class="asistencia-opciones">
+        {% for valor, etiqueta in estados %}
+        <label class="asistencia-opcion asistencia-opcion-{{ valor }}">
+          <input type="radio" name="estado_{{ e.matricula.id }}" value="{{ valor }}"
+                 {% if e.estado == valor %}checked{% endif %}>{{ etiqueta }}
+        </label>
+        {% endfor %}
+      </span>
+    </div>
+    {% endfor %}
+
+    <div class="asistencia-pie">
+      <button type="submit" class="btn">Guardar asistencia</button>
+      <button type="button" class="btn btn-secundario btn-sm" id="marcar-todos">Marcar todos como asistió</button>
+    </div>
+  </form>
+{% endif %}
+
+<p style="margin-top:1.5rem;">
+  <a class="volver" href="{% url 'grupo_clases' clase.grupo.id %}">← Clases de este grupo</a>
+</p>
+
+<script>
+  (function () {
+    var boton = document.getElementById("marcar-todos");
+    var form = document.getElementById("form-asistencia");
+    if (!boton || !form) { return; }
+    boton.addEventListener("click", function () {
+      // Solo rellena lo que está en blanco: quien ya tenía marca (una falta
+      // puesta hace un momento) no se pierde por pulsar el atajo.
+      var grupos = {};
+      form.querySelectorAll('input[type="radio"]').forEach(function (radio) {
+        grupos[radio.name] = grupos[radio.name] || [];
+        grupos[radio.name].push(radio);
+      });
+      Object.keys(grupos).forEach(function (nombre) {
+        var marcado = grupos[nombre].some(function (radio) { return radio.checked; });
+        if (marcado) { return; }
+        grupos[nombre].forEach(function (radio) {
+          if (radio.value === "asistio") { radio.checked = true; }
+        });
+      });
+    });
+  })();
+</script>
+{% endblock %}

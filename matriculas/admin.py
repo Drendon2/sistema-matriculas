@@ -2,8 +2,9 @@ from django.contrib import admin
 from django.utils.functional import lazy
 
 from .models import (
-    Area, Periodo, Perfil, EncuestaDemografica, Acudiente, ConfiguracionInstitucion,
-    DatosEstudiante, Promotoria, Grupo, Matricula, CupoPromotoria, EncuestaSatisfaccion,
+    Area, Asistencia, Clase, ConfirmacionClase, Periodo, Perfil,
+    EncuestaDemografica, Acudiente, ConfiguracionInstitucion, DatosEstudiante,
+    Promotoria, Grupo, Matricula, CupoPromotoria, EncuestaSatisfaccion,
 )
 
 # Perezoso a propósito: admin.py se importa al arrancar y durante `migrate`,
@@ -65,6 +66,34 @@ class EncuestaSatisfaccionAdmin(admin.ModelAdmin):
 class CupoPromotoriaAdmin(admin.ModelAdmin):
     list_display = ("promotoria", "periodo", "cupo_maximo")
     list_filter = ("periodo", "promotoria__area")
+
+
+class AsistenciaInline(admin.TabularInline):
+    model = Asistencia
+    extra = 0
+    # La hora que importa es la de la clase, no la del último retoque de una
+    # fila; se muestra pero no se edita.
+    readonly_fields = ("fecha_registro",)
+
+
+class ConfirmacionClaseInline(admin.TabularInline):
+    model = ConfirmacionClase
+    extra = 0
+    readonly_fields = ("fecha",)
+
+
+@admin.register(Clase)
+class ClaseAdmin(admin.ModelAdmin):
+    list_display = (
+        "grupo", "fecha_hora", "periodo", "registrada_por", "confirmaciones_requeridas",
+    )
+    list_filter = ("periodo", "grupo__promotoria__area")
+    # La hora la fija el botón "Iniciar clase" (auto_now_add) y el requisito de
+    # confirmaciones lo fija el tamaño del grupo el día de la clase: que
+    # cualquiera de los dos se pueda corregir a mano desde el admin vaciaría de
+    # sentido el registro y su verificación.
+    readonly_fields = ("fecha_hora", "confirmaciones_requeridas")
+    inlines = [AsistenciaInline, ConfirmacionClaseInline]
 
 
 @admin.register(Matricula)

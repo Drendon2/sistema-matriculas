@@ -1,0 +1,75 @@
+{% extends "matriculas/base.html" %}
+{% load matriculas_extras %}
+
+{% block title %}Mis clases{% endblock %}
+
+{% block content %}
+<h2>Mis clases{% if periodo %} — {{ periodo.nombre }}{% endif %}</h2>
+
+<p class="aviso">
+  Cuando tu profesor da una clase, la registra aquí. <strong>Confirmar es decir que esa clase
+  sí se dio</strong>: con eso {{ configuracion.nombre_institucion }} puede verificar que se
+  dictó, sin depender solo de quien la registró. Tienes <strong>{{ horas_plazo }} horas</strong>
+  desde que empezó la clase; dentro de ese plazo puedes también quitar tu confirmación si
+  te equivocaste. Después ya no se puede cambiar.
+</p>
+
+{% if not filas %}
+  <p class="vacio">
+    Todavía no hay clases registradas en tus grupos. Aparecerán aquí en cuanto tu profesor
+    inicie la primera.
+  </p>
+{% else %}
+  {% if por_confirmar %}
+    <p class="campo-info">Te falta{{ por_confirmar|pluralize:"n" }} {{ por_confirmar }} por confirmar.</p>
+  {% endif %}
+
+  <div class="card clase-lista">
+    {% for f in filas %}
+    <div class="clase-fila">
+      <span class="clase-datos">
+        <span class="clase-titulo">
+          <span class="tag-dot {{ f.clase.grupo.promotoria.area|tag_color }}"></span>{{ f.clase.grupo.promotoria.nombre }} · {{ f.clase.grupo.get_nivel_display }}
+        </span>
+        <span class="clase-cuando">
+          {{ f.clase.fecha_hora|date:"l j \d\e F" }} · <span class="clase-hora">{{ f.clase.fecha_hora|time:"H:i" }}</span>
+          {% if f.abierta and not f.verificada %}
+            · plazo hasta el {{ f.limite|date:"l j" }} a las {{ f.limite|time:"H:i" }}
+          {% endif %}
+        </span>
+      </span>
+
+      {% if f.verificada %}
+        <span class="estado estado-activa">Verificada</span>
+      {% elif f.vencida %}
+        {# Ya no espera respuesta: el plazo se acabó sin reunir las que pedía. #}
+        <span class="estado estado-retirada">Sin verificar</span>
+      {% else %}
+        {# Cuántas faltan, no solo "pendiente": el estudiante decide si su confirmación hace falta. #}
+        <span class="estado estado-pendiente">{{ f.confirmaciones }} de {{ f.requeridas }} confirmaciones</span>
+      {% endif %}
+
+      <span class="clase-accion">
+        {% if not f.abierta %}
+          {# Cerrado: no hay botón, así que el renglón tiene que decir por qué. #}
+          <span class="clase-mia">
+            {% if f.confirmada_por_mi %}La confirmaste · {% endif %}Plazo cerrado
+          </span>
+        {% elif f.confirmada_por_mi %}
+          <span class="clase-mia">La confirmaste</span>
+          <form action="{% url 'retirar_confirmacion_clase' f.clase.id %}" method="post">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-retirar btn-sm">Quitar mi confirmación</button>
+          </form>
+        {% else %}
+          <form action="{% url 'confirmar_clase' f.clase.id %}" method="post">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm">Sí, esta clase se dio</button>
+          </form>
+        {% endif %}
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+{% endif %}
+{% endblock %}

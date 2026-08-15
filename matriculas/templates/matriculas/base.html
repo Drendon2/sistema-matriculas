@@ -584,6 +584,80 @@
   .cupo-periodo-actual { color: var(--surface); background: var(--accent); border-color: var(--accent); }
   .cupo-periodo-actual:hover { color: var(--surface); background: var(--accent-dark); }
 
+  /* Pasar lista: la hoja de asistencia del día. Una ficha por clase (la tarjeta
+     va pineada como todo aquí) con un renglón por estudiante — nombre a la
+     izquierda, las tres opciones a la derecha, como el cuaderno de asistencia
+     que reemplaza. */
+  .clase-sello { color: var(--ink-soft); font-size: 0.9rem; margin: 0 0 1.2rem; }
+  .clase-hora {
+    font-family: var(--font-mono); font-size: 0.82rem; font-weight: 700; color: var(--ink);
+    background: var(--surface); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm); padding: 0.1rem 0.45rem;
+  }
+
+  .asistencia-lista { padding: 0.4rem 1.2rem 1.4rem; }
+  .asistencia-fila {
+    display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap;
+    padding: 0.75rem 0; border-bottom: 1px solid var(--border);
+  }
+  .asistencia-nombre {
+    flex: 1 1 14rem; display: flex; align-items: center; gap: 0.55rem;
+    font-weight: 600; color: var(--ink);
+  }
+  .asistencia-opciones { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-left: auto; }
+  /* Las tres opciones repiten el vocabulario de FORMA de .estado en vez de
+     inventar uno nuevo: asistió va sólida (vino, como "activa"), faltó va
+     tachada (como "retirada") y la excusa va punteada (avisó, pero tampoco
+     estuvo — el mismo contorno sin resolver de "cancelación solicitada"). Así
+     se distinguen sin depender del matiz. El punto de "activa" no se repite
+     aquí: el propio radio marcado ya hace de relleno sólido. */
+  .asistencia-opcion {
+    display: inline-flex; align-items: center; gap: 0.35rem; margin: 0;
+    font-size: 0.8rem; font-weight: 700; color: var(--ink-soft);
+    border: 1.5px solid var(--border-strong); border-radius: var(--radius-sm);
+    padding: 0.32rem 0.6rem; cursor: pointer; background: var(--surface);
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  }
+  .asistencia-opcion:hover { border-color: var(--ink-faint); color: var(--ink); }
+  .asistencia-opcion input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+  .asistencia-opcion-asistio:has(input:checked) {
+    color: var(--activa); background: var(--activa-bg); border-color: var(--activa);
+    box-shadow: 0 1px 4px rgba(36,88,214,0.20);
+  }
+  .asistencia-opcion-falto:has(input:checked) {
+    color: var(--danger); background: var(--danger-bg); border-color: var(--danger);
+    text-decoration: line-through;
+  }
+  .asistencia-opcion-excusa:has(input:checked) {
+    color: var(--danger); background: transparent; border-color: var(--danger);
+    border-style: dashed;
+  }
+  .asistencia-pie { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; margin-top: 1.2rem; }
+
+  /* "Mis clases": el estudiante da fe de que la clase se dio. Mismo renglón de
+     hoja —dato a la izquierda, acción a la derecha— que la lista de asistencia,
+     porque son las dos caras de la misma clase. El estado de verificación NO
+     inventa marcador propio: usa el vocabulario de .estado, sólido con punto
+     cuando ya está verificada (como una matrícula "activa": alguien la
+     reclamó) y punteado mientras faltan confirmaciones (como "pendiente"). */
+  .clase-lista { padding: 0.4rem 1.2rem 0.8rem; }
+  .clase-fila {
+    display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap;
+    padding: 0.85rem 0; border-bottom: 1px solid var(--border);
+  }
+  .clase-fila:last-child { border-bottom: none; }
+  .clase-datos { flex: 1 1 15rem; display: flex; flex-direction: column; gap: 0.15rem; }
+  .clase-titulo { font-weight: 700; color: var(--ink); }
+  .clase-cuando { font-size: 0.85rem; color: var(--ink-soft); }
+  /* La acción va en su propio bloque a la derecha y no como formulario suelto:
+     cuando el plazo se cierra ahí no queda botón, solo el rótulo de por qué, y
+     un `margin-left:auto` sobre el <form> lo habría dejado descolgado. */
+  .clase-accion { margin-left: auto; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+  .clase-mia {
+    font-family: var(--font-mono); font-size: 0.68rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.045em; color: var(--ink-soft);
+  }
+
   /* Renovación: cada promotoría que se arrastra del periodo anterior es una
      ficha marcable, no una casilla suelta perdida en el margen. */
   .renovar-opcion {
@@ -867,6 +941,13 @@
     .filtro { flex: 1 1 100%; }
     .filtro select { max-width: none; width: 100%; }
     .filtro-acciones { margin-left: 0; }
+    /* Pasar lista se hace de pie y con el celular en la mano: el nombre ocupa
+       su propio renglón y las tres opciones caen debajo alineadas a la
+       izquierda —con `margin-left:auto` quedarían pegadas al borde derecho— y
+       con más área de toque. */
+    .asistencia-nombre { flex: 1 1 100%; }
+    .asistencia-opciones { margin-left: 0; }
+    .asistencia-opcion { padding: 0.5rem 0.7rem; }
   }
 </style>
 {% comment %}
@@ -902,6 +983,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
       {% if user.perfil.rol == "estudiante" %}
         <a href="{% url 'promotorias_disponibles' %}">Promotorías disponibles</a>
         <a href="{% url 'mis_matriculas' %}">Mis matrículas</a>
+        <a href="{% url 'mis_clases' %}">Mis clases</a>
         <a href="{% url 'mis_companeros' %}">Mis compañeros</a>
       {% elif user.perfil.rol %}
         <a href="{% url 'panel' %}">Panel</a>

@@ -22,9 +22,10 @@ from .forms import (
     RegistroForm,
 )
 from .models import (
-    Acudiente, ConfiguracionInstitucion, CupoPromotoria, DatosEstudiante,
-    EncuestaSatisfaccion, Grupo, Matricula, Perfil, Periodo, Promotoria,
-    historial_por_periodo, limite_promotorias, matriculas_renovables,
+    Acudiente, Asistencia, Clase, ConfiguracionInstitucion, ConfirmacionClase,
+    CupoPromotoria, DatosEstudiante, EncuestaSatisfaccion, Grupo, Matricula,
+    Perfil, Periodo, Promotoria, clases_por_confirmar, historial_por_periodo,
+    limite_promotorias, matriculas_renovables, resumen_asistencia_grupo,
     resumen_trayectoria,
 )
 
@@ -243,9 +244,19 @@ def promotorias_disponibles(request):
                 "llena": matricula is None and maximo is not None and ocupados >= maximo,
             })
 
+    # Cuántas clases suyas están esperando que él las confirme, y todavía a
+    # tiempo. Va aquí, en la pantalla a la que cae al iniciar sesión, porque una
+    # verificación que solo vive detrás de un enlace del menú no la hace nadie —
+    # y con 48 horas de plazo, enterarse tarde es quedarse sin poder hacerla.
+    pendientes_de_confirmar = sum(
+        1 for fila in clases_por_confirmar(perfil, periodo)
+        if fila["abierta"] and not fila["confirmada_por_mi"]
+    )
+
     return render(request, "matriculas/promotorias_disponibles.html", {
         "periodo": periodo,
         "promotorias": promotorias,
+        "clases_por_confirmar": pendientes_de_confirmar,
         "cupos_usados": cupos_usados,
         "cupos_limite": limite,
         "matriculas_abiertas": abiertas,
@@ -574,6 +585,117 @@ def retirar_matricula(request, matricula_id):
 
 
 @requiere_rol("estudiante")
+def mis_clases(request):
+    """Las clases de sus grupos, para que el estudiante confirme que se dieron.
+
+    Es la otra mitad del botón del profesor: quien registra la clase es parte
+    interesada, así que hasta que suficientes estudiantes den fe, la clase queda
+    registrada pero sin verificar.
+    """
+    periodo = Periodo.en_curso()
+    filas = clases_por_confirmar(request.perfil, periodo)
+
+    return render(request, "matriculas/mis_clases.html", {
+        "periodo": periodo,
+        "filas": filas,
+        "por_confirmar": sum(
+            1 for f in filas if f["abierta"] and not f["confirmada_por_mi"]
+        ),
+        "horas_plazo": int(Clase.VENTANA_CONFIRMACION.total_seconds() // 3600),
+    })
+
+
+def _texto_plazo(limite):
+    """El límite del plazo en hora local, para un mensaje ("14/08/2026 a las 21:15")."""
+    return f"{timezone.localtime(limite):%d/%m/%Y a las %H:%M}"
+
+
+def _fila_de_clase(perfil, clase_id):
+    """La clase `clase_id` dentro de lo que este estudiante puede confirmar, o None.
+
+    Pasa por `clases_por_confirmar` a propósito, en vez de comprobar la
+    matrícula por su cuenta: así el botón y el permiso salen de la MISMA regla
+    —solo los grupos donde está inscrito, y solo las clases posteriores a su
+    matrícula— y no pueden separarse el día que la regla cambie.
+    """
+    periodo = Periodo.en_curso()
+    for fila in clases_por_confirmar(perfil, periodo):
+        if fila["clase"].id == clase_id:
+            return fila
+    return None
+
+
+@requiere_rol("estudiante")
+def confirmar_clase(request, clase_id):
+    if request.method != "POST":
+        return redirect("mis_clases")
+
+    fila = _fila_de_clase(request.perfil, clase_id)
+    if fila is None:
+        messages.error(
+            request,
+            "Esa clase no es de ninguno de tus grupos, o es anterior a tu matrícula, "
+            "así que no la puedes confirmar.",
+        )
+        return redirect("mis_clases")
+
+    # El plazo se comprueba aquí y no solo escondiendo el botón: una petición
+    # enviada desde una pestaña que quedó abierta antes de que venciera llegaría
+    # igual, y a destiempo.
+    if not fila["abierta"]:
+        messages.error(
+            request,
+            "El plazo para confirmar esa clase ya venció: solo se puede hasta 48 horas "
+            f"después, y esa terminó el {_texto_plazo(fila['limite'])}.",
+        )
+        return redirect("mis_clases")
+
+    # `get_or_create` y no `create`: dos pulsaciones seguidas del mismo botón no
+    # pueden acabar en un error de integridad contra el índice único.
+    _, creada = ConfirmacionClase.objects.get_or_create(
+        clase=fila["clase"], matricula=fila["matricula"],
+    )
+    if creada:
+        messages.success(
+            request,
+            f"Confirmaste la clase de {fila['clase'].grupo.promotoria.nombre} del "
+            f"{timezone.localtime(fila['clase'].fecha_hora):%d/%m/%Y}.",
+        )
+    return redirect("mis_clases")
+
+
+@requiere_rol("estudiante")
+def retirar_confirmacion_clase(request, clase_id):
+    """Deshace la confirmación propia (ver `ConfirmacionClase`: se equivocó de renglón).
+
+    Rige el mismo plazo de 48 horas que para confirmar: si retirar siguiera
+    abierto después, una clase ya verificada podría dejar de estarlo semanas más
+    tarde, cuando el registro ya se dio por cerrado.
+    """
+    if request.method != "POST":
+        return redirect("mis_clases")
+
+    fila = _fila_de_clase(request.perfil, clase_id)
+    if fila is None:
+        return redirect("mis_clases")
+
+    if not fila["abierta"]:
+        messages.error(
+            request,
+            "Ya no puedes cambiar esa clase: el plazo terminó el "
+            f"{_texto_plazo(fila['limite'])}.",
+        )
+        return redirect("mis_clases")
+
+    borradas, _ = ConfirmacionClase.objects.filter(
+        clase=fila["clase"], matricula=fila["matricula"],
+    ).delete()
+    if borradas:
+        messages.success(request, "Quitaste tu confirmación de esa clase.")
+    return redirect("mis_clases")
+
+
+@requiere_rol("estudiante")
 def mis_companeros(request):
     """Nombre y foto de los compañeros de la MISMA promotoría (matrícula activa)."""
     mis_matriculas_activas = Matricula.objects.filter(
@@ -654,6 +776,16 @@ def panel(request):
     if perfil.rol == "profesor":
         promotorias_qs = promotorias_qs.filter(profesor=perfil)
 
+    # Una sola consulta para todos los grupos: el botón de clase cambia de texto
+    # según si el grupo ya tiene lista abierta hoy, y preguntarlo grupo por grupo
+    # sería una consulta por fila del panel.
+    clases_de_hoy = {}
+    if periodo is not None:
+        clases_de_hoy = {
+            clase.grupo_id: clase
+            for clase in Clase.objects.filter(periodo=periodo, fecha_hora__date=timezone.localdate())
+        }
+
     datos = []
     for promotoria in promotorias_qs:
         grupos_info = []
@@ -666,6 +798,7 @@ def panel(request):
             grupos_info.append({
                 "grupo": grupo,
                 "estudiantes": [_ficha_estudiante(m) for m in matriculas],
+                "clase_hoy": clases_de_hoy.get(grupo.id),
             })
 
         sin_grupo = Matricula.objects.filter(
@@ -901,6 +1034,167 @@ def panel_asignar_grupo(request, matricula_id):
             messages.success(request, f"{matricula.estudiante.nombre_completo} quedó sin grupo asignado.")
 
     return redirect("panel")
+
+
+# ---------------------------------------------------------------------------
+# Clases dictadas y asistencia (profesor del grupo, director, administrador)
+# ---------------------------------------------------------------------------
+
+@requiere_rol(*ROLES_PANEL)
+def panel_clase_nueva(request, grupo_id):
+    """Registra la clase que empieza ahora y lleva a pasar lista.
+
+    La hora que queda guardada es la de este momento (`auto_now_add`), que es
+    justo el dato que el botón existe para capturar: no se pide ni se puede
+    escribir a mano.
+
+    Si el grupo ya tiene una clase registrada HOY no se crea otra: se lleva al
+    profesor a la lista de esa. Un grupo tiene un solo horario, así que dos
+    registros el mismo día son casi siempre el mismo botón pulsado dos veces —y
+    partir la asistencia del día en dos listas a medias es peor que cualquier
+    caso raro que esto impida.
+    """
+    if request.method != "POST":
+        return redirect("panel")
+
+    grupo = get_object_or_404(Grupo, pk=grupo_id)
+    if not _puede_gestionar_promotoria(request.perfil, grupo.promotoria):
+        messages.error(request, "No tienes acceso a esta promotoría.")
+        return redirect("panel")
+
+    periodo = Periodo.en_curso()
+    if periodo is None:
+        messages.error(
+            request,
+            "No hay un periodo en curso, así que la clase no se puede registrar en ninguno. "
+            "Pide que marquen el periodo en curso desde Gestión.",
+        )
+        return redirect("panel")
+
+    clase_de_hoy = Clase.objects.filter(
+        grupo=grupo, fecha_hora__date=timezone.localdate()
+    ).first()
+    if clase_de_hoy is not None:
+        # `success` y no `info` porque el sistema de mensajes solo tiene esas dos
+        # variantes de estilo (ver DESIGN.md → Banners), y esto no es un error:
+        # el profesor acaba donde quería, en la lista de su clase de hoy.
+        messages.success(
+            request,
+            f"Ya habías registrado una clase de este grupo hoy a las "
+            f"{timezone.localtime(clase_de_hoy.fecha_hora):%H:%M}. Esta es su lista.",
+        )
+        return redirect("clase_asistencia", clase_id=clase_de_hoy.id)
+
+    clase = Clase.abrir(grupo, periodo, request.perfil)
+    return redirect("clase_asistencia", clase_id=clase.id)
+
+
+@requiere_rol(*ROLES_PANEL)
+def clase_asistencia(request, clase_id):
+    """Pasar lista de una clase: quién vino, quién faltó y quién faltó con excusa.
+
+    Se puede volver a abrir y corregir cuantas veces haga falta —el estudiante
+    que llega tarde o el que trae la excusa al día siguiente son el caso normal,
+    no la excepción—, así que guardar es un `update_or_create` y no un alta.
+
+    Dejar a alguien sin marcar es válido a propósito (ver `Asistencia`): la
+    pantalla lo avisa, pero no bloquea el guardado.
+    """
+    clase = get_object_or_404(
+        Clase.objects.select_related("grupo", "grupo__promotoria", "grupo__promotoria__area", "periodo"),
+        pk=clase_id,
+    )
+    if not _puede_gestionar_promotoria(request.perfil, clase.grupo.promotoria):
+        messages.error(request, "No tienes acceso a esta promotoría.")
+        return redirect("panel")
+
+    matriculas = list(clase.matriculas_a_pasar())
+
+    if request.method == "POST":
+        estados_validos = dict(Asistencia.ESTADOS)
+        marcados = 0
+        with transaction.atomic():
+            for matricula in matriculas:
+                estado = request.POST.get(f"estado_{matricula.id}")
+                if estado not in estados_validos:
+                    continue
+                Asistencia.objects.update_or_create(
+                    clase=clase, matricula=matricula, defaults={"estado": estado},
+                )
+                marcados += 1
+
+        sin_marcar = len(matriculas) - marcados
+        if sin_marcar:
+            messages.success(
+                request,
+                f"Asistencia guardada. Quedaron {sin_marcar} estudiante{'s' if sin_marcar != 1 else ''} "
+                "sin marcar: puedes volver a esta clase y completarlos.",
+            )
+        else:
+            messages.success(request, "Asistencia guardada.")
+        return redirect("clase_asistencia", clase_id=clase.id)
+
+    ya_marcado = {
+        asistencia.matricula_id: asistencia.estado
+        for asistencia in clase.asistencias.all()
+    }
+    estudiantes = [
+        {
+            "matricula": matricula,
+            "perfil": matricula.estudiante,
+            "estado": ya_marcado.get(matricula.id, ""),
+            # El profesor se entera de que está de salida, igual que en el panel:
+            # la marca es informativa y no cambia que haya que pasarle lista.
+            "cancelacion": matricula.cancelacion_pendiente,
+        }
+        for matricula in matriculas
+    ]
+
+    # Del lado del profesor se enseña CUÁNTAS confirmaciones lleva la clase,
+    # nunca quién la confirmó. El número le dice lo que necesita saber —si la
+    # clase ya quedó verificada—, mientras que la lista de nombres convertiría
+    # una verificación en algo que el verificado puede reclamarle a cada
+    # estudiante por su nombre.
+    confirmaciones = clase.confirmaciones.count()
+
+    return render(request, "matriculas/clase_asistencia.html", {
+        "clase": clase,
+        "estudiantes": estudiantes,
+        "estados": Asistencia.ESTADOS,
+        "sin_pasar": sum(1 for e in estudiantes if not e["estado"]),
+        "confirmaciones": confirmaciones,
+        "requeridas": clase.confirmaciones_requeridas,
+        "verificada": clase.esta_confirmada(confirmaciones),
+        "vencida": clase.verificacion_vencida(confirmaciones),
+        "limite_confirmacion": clase.limite_confirmacion,
+    })
+
+
+@requiere_rol(*ROLES_PANEL)
+def grupo_clases(request, grupo_id):
+    """Las clases dictadas de un grupo en el periodo en curso, y cómo va cada quien.
+
+    Es la otra mitad del botón de "Iniciar clase": sin esta pantalla la
+    asistencia sería un dato que solo se escribe. Sirve para las dos preguntas
+    que se hacen de verdad —qué días hubo clase y quién está dejando de venir— y
+    es el único camino para volver a una lista y corregirla.
+    """
+    grupo = get_object_or_404(
+        Grupo.objects.select_related("promotoria", "promotoria__area"), pk=grupo_id
+    )
+    if not _puede_gestionar_promotoria(request.perfil, grupo.promotoria):
+        messages.error(request, "No tienes acceso a esta promotoría.")
+        return redirect("panel")
+
+    periodo = Periodo.en_curso()
+    clases, filas = ([], []) if periodo is None else resumen_asistencia_grupo(grupo, periodo)
+
+    return render(request, "matriculas/grupo_clases.html", {
+        "grupo": grupo,
+        "periodo": periodo,
+        "clases": clases,
+        "filas": filas,
+    })
 
 
 def _puede_ver_ficha(solicitante, objetivo):

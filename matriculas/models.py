@@ -30,7 +30,7 @@ Flujo de matrícula/grupos:
 import colorsys
 import io
 import os
-from datetime import date
+from datetime import date, timedelta
 
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
@@ -39,6 +39,7 @@ from django.db import models, transaction
 from django.db.models import Q
 from django.db.utils import OperationalError, ProgrammingError
 from django.contrib.auth.models import User
+from django.utils import timezone
 from PIL import Image, ImageOps
 
 
@@ -1083,6 +1084,390 @@ class Matricula(models.Model):
     def __str__(self):
         destino = self.grupo or self.promotoria
         return f"{self.estudiante.nombre_completo} -> {destino}"
+
+
+# ---------------------------------------------------------------------------
+# Clases dictadas y asistencia
+# ---------------------------------------------------------------------------
+
+class Clase(models.Model):
+    """Una sesión de clase concreta, registrada por el profesor al darla.
+
+    No se programa por adelantado ni se deduce del `horario` del grupo: el
+    profesor oprime "Iniciar clase" cuando la clase empieza y lo que queda
+    guardado es la hora REAL en que la oprimió. Esa es toda la diferencia entre
+    el horario (lo que debería pasar cada semana) y esta tabla (lo que pasó).
+
+    Va atada al grupo y no a la promotoría porque la lista que se pasa es la de
+    un horario concreto: dos grupos de la misma promotoría se ven en días
+    distintos y cada uno tiene su propia asistencia.
+
+    Guarda también el periodo, aunque se pueda deducir de la fecha: es lo que
+    permite reconstruir la asistencia de un periodo cerrado sin depender de
+    comparar fechas contra los periodos que existan en ese momento.
+
+    Que la clase esté registrada no significa todavía que se haya dado: eso lo
+    dan por cierto los propios estudiantes (ver `ConfirmacionClase` y
+    `confirmaciones_para`).
+    """
+
+    # Cuántos estudiantes tienen que dar fe de una clase para tenerla por
+    # dictada. Tres es el número normal; en un grupo de uno o dos no se puede
+    # pedir más gente de la que hay, así que basta uno.
+    CONFIRMACIONES_REQUERIDAS = 3
+    GRUPO_PEQUENO = 2
+
+    # Cuánto tiempo queda abierta la confirmación después de la clase. Dos días
+    # cubren al que no llevaba el celular encima y al que solo entra al sistema
+    # en la noche, sin llegar a la semana siguiente: lo que se confirma es que
+    # una clase concreta se dio, y eso se recuerda con precisión el mismo día,
+    # no cuando ya se mezcló con la del martes que viene. Vencido el plazo, lo
+    # que haya quedado registrado es definitivo — ni se confirma ni se retira.
+    VENTANA_CONFIRMACION = timedelta(hours=48)
+
+    grupo = models.ForeignKey(Grupo, on_delete=models.CASCADE, related_name="clases")
+    periodo = models.ForeignKey(Periodo, on_delete=models.PROTECT, related_name="clases")
+    fecha_hora = models.DateTimeField(auto_now_add=True, verbose_name="fecha y hora")
+    registrada_por = models.ForeignKey(
+        Perfil, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="clases_registradas", verbose_name="registrada por",
+        help_text="Quién oprimió el botón. Queda en blanco si esa cuenta se elimina.",
+    )
+    confirmaciones_requeridas = models.PositiveSmallIntegerField(
+        default=CONFIRMACIONES_REQUERIDAS,
+        verbose_name="confirmaciones requeridas",
+        help_text=(
+            "Cuántos estudiantes tienen que confirmar esta clase. Lo fija el sistema "
+            "al abrirla, según cuánta gente había inscrita en el grupo en ese momento."
+        ),
+    )
+
+    class Meta:
+        verbose_name = "Clase"
+        verbose_name_plural = "Clases"
+        ordering = ["-fecha_hora"]
+
+    def __str__(self):
+        return f"{self.grupo} — {self.fecha_hora:%d/%m/%Y %H:%M}"
+
+    @classmethod
+    def confirmaciones_para(cls, inscritos):
+        """Cuántas confirmaciones necesita una clase de un grupo de ese tamaño.
+
+        Tres es el número normal. Un grupo de uno o dos estudiantes no puede
+        reunirlas nunca, así que ahí basta con una: el requisito tiene que ser
+        alcanzable o deja de verificar nada.
+
+        Un grupo VACÍO devuelve cero, y eso no significa "ya está confirmada":
+        significa que no hay nadie que pueda confirmarla (ver `esta_confirmada`,
+        que exige un requisito mayor que cero).
+        """
+        if inscritos <= 0:
+            return 0
+        return 1 if inscritos <= cls.GRUPO_PEQUENO else cls.CONFIRMACIONES_REQUERIDAS
+
+    @classmethod
+    def abrir(cls, grupo, periodo, perfil):
+        """Registra la clase que empieza ahora, con su requisito ya fijado.
+
+        El número de confirmaciones se CONGELA aquí y no se recalcula después, a
+        diferencia de la lista de asistencia, que sí se resuelve cada vez que se
+        abre. Son dos cosas distintas: la lista tiene que reflejar quién está
+        hoy en el grupo, mientras que el requisito describe el grupo tal como
+        era el día de la clase. Si se recalculara, una clase ya confirmada
+        volvería a quedar en falta solo porque después entró gente nueva.
+        """
+        inscritos = Matricula.objects.filter(
+            grupo=grupo, periodo=periodo, estado__in=Matricula.ESTADOS_INSCRITO,
+        ).count()
+        return cls.objects.create(
+            grupo=grupo, periodo=periodo, registrada_por=perfil,
+            confirmaciones_requeridas=cls.confirmaciones_para(inscritos),
+        )
+
+    def esta_confirmada(self, total=None):
+        """¿Ya la dieron por dictada suficientes estudiantes?
+
+        `total` evita otra consulta cuando quien llama ya contó las
+        confirmaciones (los listados las traen agregadas de una vez).
+        """
+        if self.confirmaciones_requeridas <= 0:
+            return False
+        if total is None:
+            total = self.confirmaciones.count()
+        return total >= self.confirmaciones_requeridas
+
+    @property
+    def limite_confirmacion(self):
+        """Hasta cuándo se puede confirmar o retirar la confirmación."""
+        return self.fecha_hora + self.VENTANA_CONFIRMACION
+
+    def confirmacion_abierta(self, ahora=None):
+        """¿Sigue dentro del plazo?
+
+        Rige el mismo plazo para confirmar y para retirar la confirmación: es la
+        misma ventana en la que todo se puede corregir, y pasada ella lo
+        registrado queda como está. Si retirar siguiera abierto después, una
+        clase ya verificada podría dejar de estarlo semanas más tarde.
+        """
+        return (ahora or timezone.now()) < self.limite_confirmacion
+
+    def verificacion_vencida(self, total=None, ahora=None):
+        """El plazo se acabó y la clase no reunió las confirmaciones que pedía.
+
+        Es un desenlace, no un estado a medias: ya no puede cambiar. Se separa
+        de "todavía faltan" porque las dos cosas se leen igual en un conteo
+        (1 de 3) y significan lo contrario — una espera respuesta y la otra ya
+        no la va a tener.
+        """
+        return not self.confirmacion_abierta(ahora) and not self.esta_confirmada(total)
+
+    def matriculas_a_pasar(self):
+        """Los estudiantes a los que hay que pasar lista en esta clase.
+
+        Se resuelve al abrir la lista y NO se congela al crear la clase: si el
+        profesor movió a alguien de grupo entre una sesión y la siguiente, la
+        lista de hoy tiene que ser la de hoy.
+
+        Incluye a quien pidió cancelar (`ESTADOS_INSCRITO`) porque mientras la
+        dirección no resuelva la solicitud el estudiante sigue yendo a clase, y
+        el profesor tiene que poder marcarlo igual que a los demás.
+        """
+        return (
+            Matricula.objects.filter(
+                grupo=self.grupo, periodo=self.periodo,
+                estado__in=Matricula.ESTADOS_INSCRITO,
+            )
+            .select_related("estudiante")
+            .order_by("estudiante__nombre_completo")
+        )
+
+
+class Asistencia(models.Model):
+    """Cómo le fue a UN estudiante en UNA clase: vino, faltó, o faltó con excusa.
+
+    Las tres opciones son excluyentes y no hay un cuarto estado "sin marcar":
+    eso se representa por la ausencia de fila. Que no exista la fila es
+    información real —la clase se registró y a esa persona nadie la pasó, por
+    ejemplo porque llegó tarde y el profesor cerró antes—, y convertirlo en un
+    valor guardado haría imposible distinguirlo de una respuesta deliberada.
+    """
+
+    ESTADOS = [
+        ("asistio", "Asistió"),
+        ("falto", "Faltó"),
+        ("excusa", "Faltó con excusa"),
+    ]
+
+    clase = models.ForeignKey(Clase, on_delete=models.CASCADE, related_name="asistencias")
+    # Va contra la MATRÍCULA y no contra el perfil: es lo que ata la asistencia
+    # a la promotoría y el periodo concretos en los que se dio la clase. El
+    # mismo estudiante puede estar en dos promotorías a la vez, y sus faltas de
+    # una no son las de la otra.
+    matricula = models.ForeignKey(Matricula, on_delete=models.CASCADE, related_name="asistencias")
+    estado = models.CharField(max_length=10, choices=ESTADOS)
+    fecha_registro = models.DateTimeField(auto_now=True, verbose_name="fecha de registro")
+
+    class Meta:
+        verbose_name = "Asistencia"
+        verbose_name_plural = "Asistencias"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["clase", "matricula"],
+                name="una_asistencia_por_clase_y_matricula",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.matricula.estudiante.nombre_completo}: {self.get_estado_display()}"
+
+
+class ConfirmacionClase(models.Model):
+    """Un estudiante da fe, desde su propia sesión, de que la clase se dio.
+
+    Es el contrapeso del botón del profesor: quien registra la clase es parte
+    interesada, así que el registro por sí solo no prueba nada. La clase se
+    tiene por dictada cuando la confirman suficientes estudiantes (ver
+    `Clase.confirmaciones_para`).
+
+    Confirma cualquier estudiante inscrito en el grupo, no solo aquel a quien el
+    profesor marcó presente: lo que se está verificando es que la clase existió,
+    y hacerlo depender de la asistencia que marca el propio profesor dejaría la
+    verificación en manos de la persona verificada.
+
+    Se puede retirar. Una confirmación es una afirmación de alguien sobre lo que
+    vio, y quien se equivocó de renglón tiene que poder deshacerlo; dejar la
+    marca fija por miedo a que alguien juegue con ella tendría el precio de
+    volver permanente justo el error que este registro existe para evitar.
+    """
+
+    clase = models.ForeignKey(Clase, on_delete=models.CASCADE, related_name="confirmaciones")
+    matricula = models.ForeignKey(
+        Matricula, on_delete=models.CASCADE, related_name="confirmaciones_clase",
+    )
+    fecha = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Confirmación de clase"
+        verbose_name_plural = "Confirmaciones de clase"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["clase", "matricula"],
+                name="una_confirmacion_por_clase_y_estudiante",
+                violation_error_message="Ya confirmaste esta clase.",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.matricula.estudiante.nombre_completo} confirma {self.clase}"
+
+
+def clases_por_confirmar(perfil, periodo):
+    """Las clases de este estudiante en el periodo, con su estado de verificación.
+
+    Devuelve [{clase, matricula, confirmada_por_mi, confirmaciones, requeridas,
+    verificada, abierta, vencida, limite}], de la más reciente a la más antigua.
+
+    Solo entran las clases posteriores a su matrícula: quien acaba de entrar al
+    grupo no estuvo en las clases de antes y no puede dar fe de ellas. Es la
+    misma idea que sostiene todo esto — se confirma lo que uno vio.
+
+    Se listan también las que ya confirmó, las que ya alcanzaron el número
+    requerido y las que se les venció el plazo, en vez de esconderlas: el
+    estudiante tiene que poder ver qué confirmó (y retirarlo mientras esté a
+    tiempo), y ocultar las cerradas convertiría la lista en algo que cambia de
+    contenido según lo que hagan los demás.
+    """
+    if periodo is None:
+        return []
+
+    matriculas = {
+        m.grupo_id: m
+        for m in Matricula.objects.filter(
+            estudiante=perfil, periodo=periodo, grupo__isnull=False,
+            estado__in=Matricula.ESTADOS_INSCRITO,
+        )
+    }
+    if not matriculas:
+        return []
+
+    clases = (
+        Clase.objects.filter(periodo=periodo, grupo_id__in=matriculas)
+        .select_related("grupo", "grupo__promotoria", "grupo__promotoria__area")
+        .annotate(total_confirmaciones=models.Count("confirmaciones"))
+        .order_by("-fecha_hora")
+    )
+    mias = set(
+        ConfirmacionClase.objects.filter(
+            clase__in=clases, matricula__estudiante=perfil,
+        ).values_list("clase_id", flat=True)
+    )
+
+    # Una sola lectura del reloj para toda la lista: si se leyera por fila, dos
+    # clases del mismo momento podrían caer a distinto lado del plazo.
+    ahora = timezone.now()
+
+    filas = []
+    for clase in clases:
+        matricula = matriculas[clase.grupo_id]
+        if clase.fecha_hora < matricula.fecha:
+            continue
+        total = clase.total_confirmaciones
+        filas.append({
+            "clase": clase,
+            "matricula": matricula,
+            "confirmada_por_mi": clase.id in mias,
+            "confirmaciones": total,
+            "requeridas": clase.confirmaciones_requeridas,
+            "verificada": clase.esta_confirmada(total),
+            "abierta": clase.confirmacion_abierta(ahora),
+            "vencida": clase.verificacion_vencida(total, ahora),
+            "limite": clase.limite_confirmacion,
+        })
+    return filas
+
+
+def resumen_asistencia_grupo(grupo, periodo):
+    """Asistencia del grupo en el periodo: por clase y por estudiante.
+
+    Devuelve (clases, filas):
+
+    - `clases`: las sesiones registradas, de la más reciente a la más antigua,
+      cada una con su conteo por estado y cuántos quedaron sin marcar.
+    - `filas`: una por estudiante inscrito, con sus conteos y el porcentaje de
+      asistencia sobre las clases dictadas.
+
+    Todo sale de dos consultas agregadas y no de recorrer las asistencias en
+    Python: un grupo de veinte personas con un semestre de clases son cientos
+    de filas, y esta pantalla se abre a menudo.
+
+    El porcentaje se calcula sobre TODAS las clases del grupo, no sobre las
+    veces que a esa persona la marcaron: si no, quien nunca fue y a quien nadie
+    llegó a marcar aparecería con un 100 % vacío. La excusa cuenta como falta
+    para el porcentaje —no estuvo en clase— pero se muestra aparte, que es lo
+    que permite distinguir a quien avisa de quien no.
+    """
+    clases_qs = (
+        grupo.clases.filter(periodo=periodo)
+        .annotate(total_confirmaciones=models.Count("confirmaciones"))
+        .order_by("-fecha_hora")
+    )
+
+    conteos_por_clase = {}
+    for fila in (
+        Asistencia.objects.filter(clase__grupo=grupo, clase__periodo=periodo)
+        .values("clase_id", "estado").annotate(total=models.Count("id"))
+    ):
+        conteos_por_clase.setdefault(fila["clase_id"], {})[fila["estado"]] = fila["total"]
+
+    matriculas = list(
+        Matricula.objects.filter(
+            grupo=grupo, periodo=periodo, estado__in=Matricula.ESTADOS_INSCRITO,
+        ).select_related("estudiante").order_by("estudiante__nombre_completo")
+    )
+    inscritos = len(matriculas)
+
+    clases = []
+    for clase in clases_qs:
+        conteo = conteos_por_clase.get(clase.id, {})
+        marcados = sum(conteo.values())
+        clases.append({
+            "clase": clase,
+            "asistio": conteo.get("asistio", 0),
+            "falto": conteo.get("falto", 0),
+            "excusa": conteo.get("excusa", 0),
+            # Puede salir negativo si alguien entró al grupo DESPUÉS de una
+            # clase ya pasada: se acota a cero en vez de enseñar un número
+            # imposible.
+            "sin_marcar": max(0, inscritos - marcados),
+            "confirmaciones": clase.total_confirmaciones,
+            "requeridas": clase.confirmaciones_requeridas,
+            "verificada": clase.esta_confirmada(clase.total_confirmaciones),
+            "vencida": clase.verificacion_vencida(clase.total_confirmaciones),
+        })
+
+    total_clases = len(clases)
+
+    conteos_por_matricula = {}
+    for fila in (
+        Asistencia.objects.filter(clase__grupo=grupo, clase__periodo=periodo)
+        .values("matricula_id", "estado").annotate(total=models.Count("id"))
+    ):
+        conteos_por_matricula.setdefault(fila["matricula_id"], {})[fila["estado"]] = fila["total"]
+
+    filas = []
+    for matricula in matriculas:
+        conteo = conteos_por_matricula.get(matricula.id, {})
+        asistio = conteo.get("asistio", 0)
+        filas.append({
+            "matricula": matricula,
+            "asistio": asistio,
+            "falto": conteo.get("falto", 0),
+            "excusa": conteo.get("excusa", 0),
+            "porcentaje": round(100 * asistio / total_clases) if total_clases else None,
+        })
+
+    return clases, filas
 
 
 def matriculas_renovables(perfil, periodo_actual):

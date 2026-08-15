@@ -289,6 +289,17 @@ Tira de controles sobre una tabla, en tarjeta propia con `--shadow` — etiqueta
 
 El botón de acción **sigue al último control** en vez de irse al extremo derecho: en una sola fila la diferencia no se nota, pero en cuanto la barra se parte en dos líneas un `margin-left: auto` lo deja descolgado al otro lado de un hueco vacío. Los desplegables jerárquicos usan `<optgroup>` (Promotoría agrupada por Área, Grupo por Promotoría), así la jerarquía del catálogo se ve sin recargar la página al elegir el nivel de arriba. "Limpiar" solo aparece cuando hay algún filtro puesto.
 
+### Hoja de asistencia (`.asistencia-fila`)
+La lista que despliega "Iniciar clase": una tarjeta con `--shadow` —la hoja del día, pineada como todo aquí— y un renglón por estudiante, nombre a la izquierda y las tres opciones a la derecha, separados por una línea fina. Es el cuaderno de asistencia que reemplaza, no un formulario de campos apilados.
+
+Las tres opciones **reutilizan el vocabulario de forma de `.estado`** en vez de inventar uno nuevo: *asistió* va sólida en el azul de "activa" (vino), *faltó* va sólida y **tachada** en rojo (como "retirada") y *faltó con excusa* va con **contorno punteado** rojo (avisó, pero tampoco estuvo — el mismo contorno sin resolver de "cancelación solicitada"). Las tres se distinguen sin depender del matiz. El punto de cabeza de pin no se repite aquí: el propio radio marcado ya hace de relleno sólido.
+
+La cara del estudiante (`.clase-fila`, "Mis clases") repite ese mismo renglón —dato a la izquierda, acción a la derecha— porque son las dos caras de la misma clase. El **estado de verificación** tampoco inventa marcador: reutiliza `.estado` tal cual, **sólido con punto** cuando ya está verificada (alguien la reclamó, igual que una matrícula "activa") y **punteado** mientras faltan confirmaciones (sin resolver, igual que "pendiente"). El marcador punteado lleva el conteo dentro —«1 de 3»— y no un rótulo genérico: el estudiante decide si su confirmación todavía hace falta.
+
+Vencido el plazo de confirmación, lo que no llegó al número pasa a **«Sin verificar» con el tratamiento de "retirada"** (borde y texto rojo, tachado). El tachado es la parte que trabaja: separa un desenlace cerrado —esto ya no va a cambiar— de un «1 de 3» punteado, que sigue esperando respuesta. Los dos dicen que faltan confirmaciones y significan lo contrario, así que no pueden compartir forma. Donde no queda botón porque el plazo cerró, el renglón lo dice con un rótulo en monoespaciada («Plazo cerrado»): un hueco vacío donde antes había una acción se lee como un fallo, no como una regla.
+
+**Sin marcar no tiene forma propia**, y es deliberado: una opción vacía significa que a esa persona nadie la pasó, y la pantalla lo dice con una cifra ("Falta 1 de 12 por marcar"), no con un cuarto marcador que competiría con los tres reales.
+
 ### Navigation
 - **Barra superior:** riel claro (blanco, borde inferior fino), título en negrita frase normal, enlaces en frase normal con fondo suave al pasar el cursor.
 - **Pestañas de sección (`.tarjeta-enlace`):** ficha pineada con el pin de esquina (ver Shapes) — el vocabulario de navegación del hub de Gestión.

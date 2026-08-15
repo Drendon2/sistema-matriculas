@@ -6,6 +6,17 @@
 {% block content %}
 <h2>Promotorías disponibles{% if periodo %} — {{ periodo.nombre }}{% endif %}</h2>
 
+{% if clases_por_confirmar %}
+<div class="renovar-llamada">
+  <p>
+    Tienes <strong>{{ clases_por_confirmar }} clase{{ clases_por_confirmar|pluralize }}</strong>
+    sin confirmar. Confirmar es decir que la clase sí se dio: es lo que le permite a
+    {{ configuracion.nombre_institucion }} verificar que se dictó.
+  </p>
+  <a class="btn" href="{% url 'mis_clases' %}">Confirmar mis clases</a>
+</div>
+{% endif %}
+
 {% if not periodo %}
   <p class="vacio">No hay un periodo de matrícula activo en este momento.</p>
 {% elif not promotorias %}

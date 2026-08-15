@@ -20,13 +20,14 @@ from django.core.exceptions import ValidationError
 from django.template.loader import render_to_string
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from .models import (
     RANURA_MAXIMA_ABSOLUTA,
-    Acudiente, Area, ConfiguracionInstitucion, CupoPromotoria, DatosEstudiante,
-    EncuestaDemografica, Grupo,
+    Acudiente, Area, Asistencia, Clase, ConfiguracionInstitucion, CupoPromotoria,
+    DatosEstudiante, EncuestaDemografica, Grupo,
     Matricula, Perfil, Periodo, Promotoria, historial_por_periodo,
-    matriculas_renovables,
+    matriculas_renovables, resumen_asistencia_grupo,
     resumen_trayectoria,
 )
 from .views_gestion import (
@@ -1637,3 +1638,598 @@ class TortaTests(SimpleTestCase):
 
         self.assertEqual(torta["sectores"], [])
         self.assertEqual(torta["total"], 0)
+
+
+class AsistenciaTests(TestCase):
+    """El botón de clase y la lista que despliega.
+
+    Dos cosas se prueban aquí y son distintas: que oprimir el botón deje
+    registrada una sesión con la hora REAL (y no dos por un doble clic), y que
+    la lista que sale sea la de los estudiantes que a día de hoy están en ese
+    grupo, marcable y corregible.
+    """
+
+    def setUp(self):
+        self.periodo = Periodo.objects.create(
+            nombre="2026-1", fecha_inicio=date(2026, 1, 15), fecha_fin=date(2026, 6, 15),
+            activo=True, matriculas_abiertas=True,
+        )
+        area = Area.objects.create(nombre="Música")
+
+        self.profesor = self.crear_perfil("profe", "Profe Díaz", rol="profesor")
+        self.violin = Promotoria.objects.create(nombre="Violín", area=area, profesor=self.profesor)
+        self.grupo = Grupo.objects.create(
+            promotoria=self.violin, nivel="basico", horario="Lunes 4pm",
+            salon="A1", cupo_maximo=10,
+        )
+
+        self.ana = self.crear_estudiante("ana", "Ana Ruiz")
+        self.beto = self.crear_estudiante("beto", "Beto Páez")
+        self.matricula_ana = self.matricular(self.ana)
+        self.matricula_beto = self.matricular(self.beto)
+
+        self.client.force_login(self.profesor.usuario)
+
+    # -- utilidades ---------------------------------------------------------
+
+    def crear_perfil(self, username, nombre, rol):
+        usuario = User.objects.create_user(username=username, password="x")
+        return Perfil.objects.create(
+            usuario=usuario, rol=rol, nombre_completo=nombre,
+            fecha_nacimiento=date(1990, 1, 1), telefono="3000000000",
+        )
+
+    def crear_estudiante(self, username, nombre):
+        perfil = self.crear_perfil(username, nombre, rol="estudiante")
+        DatosEstudiante.objects.create(perfil=perfil, documento_identidad=username)
+        return perfil
+
+    def matricular(self, perfil, estado="activa", grupo=True):
+        matricula = Matricula(
+            estudiante=perfil, promotoria=self.violin, periodo=self.periodo,
+            estado=estado, grupo=self.grupo if grupo else None,
+        )
+        matricula.full_clean()
+        matricula.save()
+        return matricula
+
+    def iniciar_clase(self):
+        return self.client.post(reverse("panel_clase_nueva", args=[self.grupo.id]))
+
+    def pasar_lista(self, clase, **estados):
+        """Marca por nombre: pasar_lista(clase, ana="asistio", beto="falto")."""
+        datos = {
+            "estado_%s" % getattr(self, "matricula_" + quien).id: estado
+            for quien, estado in estados.items()
+        }
+        return self.client.post(reverse("clase_asistencia", args=[clase.id]), datos)
+
+    # -- el botón -----------------------------------------------------------
+
+    def test_el_boton_registra_la_clase_con_la_hora_del_momento(self):
+        antes = timezone.now()
+
+        respuesta = self.iniciar_clase()
+
+        clase = Clase.objects.get()
+        self.assertEqual(clase.grupo, self.grupo)
+        self.assertEqual(clase.periodo, self.periodo)
+        self.assertEqual(clase.registrada_por, self.profesor)
+        self.assertGreaterEqual(clase.fecha_hora, antes)
+        self.assertLessEqual(clase.fecha_hora, timezone.now())
+        self.assertRedirects(respuesta, reverse("clase_asistencia", args=[clase.id]))
+
+    def test_oprimirlo_dos_veces_el_mismo_dia_no_parte_la_lista_en_dos(self):
+        """Casi siempre es el mismo botón pulsado dos veces, no dos clases."""
+        self.iniciar_clase()
+        primera = Clase.objects.get()
+
+        respuesta = self.iniciar_clase()
+
+        self.assertEqual(Clase.objects.count(), 1)
+        self.assertRedirects(respuesta, reverse("clase_asistencia", args=[primera.id]))
+
+    def test_la_clase_de_ayer_no_estorba_la_de_hoy(self):
+        self.iniciar_clase()
+        Clase.objects.update(fecha_hora=timezone.now() - timedelta(days=1))
+
+        self.iniciar_clase()
+
+        self.assertEqual(Clase.objects.count(), 2)
+
+    def test_un_profesor_ajeno_no_puede_abrir_clase_en_un_grupo_que_no_dicta(self):
+        otro = self.crear_perfil("otro", "Otro Profe", rol="profesor")
+        self.client.force_login(otro.usuario)
+
+        self.iniciar_clase()
+
+        self.assertFalse(Clase.objects.exists())
+
+    def test_sin_periodo_en_curso_no_se_registra_nada(self):
+        """La clase tiene que caer en algún periodo: si no hay, no se inventa."""
+        Periodo.objects.update(activo=False)
+
+        self.iniciar_clase()
+
+        self.assertFalse(Clase.objects.exists())
+
+    # -- la lista -----------------------------------------------------------
+
+    def test_la_lista_trae_a_los_inscritos_de_hoy(self):
+        """Pendientes y retirados no van a clase; quien pidió cancelar, sí."""
+        pendiente = self.crear_estudiante("caro", "Caro Lima")
+        self.matricular(pendiente, estado="pendiente")
+        saliente = self.crear_estudiante("dani", "Dani Soto")
+        self.matricular(saliente, estado=Matricula.ESTADO_CANCELACION)
+
+        self.iniciar_clase()
+        clase = Clase.objects.get()
+        nombres = [m.estudiante.nombre_completo for m in clase.matriculas_a_pasar()]
+
+        self.assertEqual(nombres, ["Ana Ruiz", "Beto Páez", "Dani Soto"])
+
+    def test_marcar_guarda_los_tres_estados(self):
+        self.iniciar_clase()
+        clase = Clase.objects.get()
+        caro = self.crear_estudiante("caro", "Caro Lima")
+        self.matricula_caro = self.matricular(caro)
+
+        self.pasar_lista(clase, ana="asistio", beto="falto", caro="excusa")
+
+        marcado = {
+            a.matricula.estudiante.nombre_completo: a.estado
+            for a in clase.asistencias.all()
+        }
+        self.assertEqual(
+            marcado, {"Ana Ruiz": "asistio", "Beto Páez": "falto", "Caro Lima": "excusa"}
+        )
+
+    def test_volver_a_marcar_corrige_en_vez_de_duplicar(self):
+        """La excusa llega al día siguiente: la lista se reabre y se corrige."""
+        self.iniciar_clase()
+        clase = Clase.objects.get()
+        self.pasar_lista(clase, ana="falto", beto="asistio")
+
+        self.pasar_lista(clase, ana="excusa", beto="asistio")
+
+        self.assertEqual(clase.asistencias.count(), 2)
+        self.assertEqual(clase.asistencias.get(matricula=self.matricula_ana).estado, "excusa")
+
+    def test_quien_no_se_marca_no_deja_fila(self):
+        """Sin marcar no es un estado: es que a esa persona nadie la pasó."""
+        self.iniciar_clase()
+        clase = Clase.objects.get()
+
+        self.pasar_lista(clase, ana="asistio")
+
+        self.assertEqual(clase.asistencias.count(), 1)
+
+    def test_un_estado_inventado_se_ignora(self):
+        self.iniciar_clase()
+        clase = Clase.objects.get()
+
+        self.pasar_lista(clase, ana="llego_tarde")
+
+        self.assertFalse(clase.asistencias.exists())
+
+    def test_un_profesor_ajeno_no_ve_ni_marca_la_lista(self):
+        self.iniciar_clase()
+        clase = Clase.objects.get()
+        otro = self.crear_perfil("otro", "Otro Profe", rol="profesor")
+        self.client.force_login(otro.usuario)
+
+        respuesta = self.client.get(reverse("clase_asistencia", args=[clase.id]))
+        self.pasar_lista(clase, ana="asistio")
+
+        self.assertRedirects(respuesta, reverse("panel"))
+        self.assertFalse(Asistencia.objects.exists())
+
+    # -- el resumen del grupo -----------------------------------------------
+
+    def test_el_resumen_cuenta_por_clase_y_por_estudiante(self):
+        self.iniciar_clase()
+        primera = Clase.objects.get()
+        self.pasar_lista(primera, ana="asistio", beto="falto")
+        Clase.objects.update(fecha_hora=timezone.now() - timedelta(days=1))
+        self.iniciar_clase()
+        segunda = Clase.objects.exclude(pk=primera.pk).get()
+        self.pasar_lista(segunda, ana="asistio", beto="excusa")
+
+        clases, filas = resumen_asistencia_grupo(self.grupo, self.periodo)
+
+        # De la más reciente a la más antigua.
+        self.assertEqual([c["clase"].id for c in clases], [segunda.id, primera.id])
+        self.assertEqual([c["asistio"] for c in clases], [1, 1])
+        self.assertEqual([c["excusa"] for c in clases], [1, 0])
+        por_nombre = {f["matricula"].estudiante.nombre_completo: f for f in filas}
+        self.assertEqual(por_nombre["Ana Ruiz"]["porcentaje"], 100)
+        self.assertEqual(por_nombre["Beto Páez"]["porcentaje"], 0)
+        self.assertEqual(por_nombre["Beto Páez"]["excusa"], 1)
+
+    def test_quien_no_fue_nunca_no_sale_con_100_por_ciento(self):
+        """El porcentaje va sobre las clases dictadas, no sobre las veces marcado."""
+        self.iniciar_clase()
+
+        _, filas = resumen_asistencia_grupo(self.grupo, self.periodo)
+
+        self.assertEqual([f["porcentaje"] for f in filas], [0, 0])
+
+    def test_los_que_faltan_por_pasar_se_ven_en_el_resumen(self):
+        self.iniciar_clase()
+        clase = Clase.objects.get()
+        self.pasar_lista(clase, ana="asistio")
+
+        clases, _ = resumen_asistencia_grupo(self.grupo, self.periodo)
+
+        self.assertEqual(clases[0]["sin_marcar"], 1)
+
+    def test_sin_clases_todavia_no_hay_porcentaje_que_dar(self):
+        """Cero de cero no es cero por ciento: no hay dato."""
+        _, filas = resumen_asistencia_grupo(self.grupo, self.periodo)
+
+        self.assertEqual([f["porcentaje"] for f in filas], [None, None])
+
+    # -- lo que se ve en pantalla -------------------------------------------
+
+    def test_las_dos_pantallas_no_dejan_escapar_sintaxis_de_plantilla(self):
+        """Se prueba sobre el HTML renderizado, no sobre los números.
+
+        Un comentario `{# ... #}` partido en dos líneas NO es un comentario para
+        Django: se imprime tal cual en medio de la tabla. Los conteos estaban
+        perfectos y los tests en verde mientras la página enseñaba el comentario
+        —el mismo modo de fallar que ya había mordido a la torta de
+        Estadísticas—, así que esto se mira en el marcado.
+        """
+        self.iniciar_clase()
+        clase = Clase.objects.get()
+
+        paginas = [
+            self.client.get(reverse("clase_asistencia", args=[clase.id])),
+            self.client.get(reverse("grupo_clases", args=[self.grupo.id])),
+        ]
+
+        for pagina in paginas:
+            html = pagina.content.decode()
+            self.assertEqual(pagina.status_code, 200)
+            for resto in ("{#", "#}", "{%", "%}", "{{", "}}"):
+                self.assertNotIn(resto, html)
+
+    def test_la_lista_ofrece_las_tres_opciones_por_estudiante(self):
+        self.iniciar_clase()
+        clase = Clase.objects.get()
+
+        html = self.client.get(reverse("clase_asistencia", args=[clase.id])).content.decode()
+
+        for valor, _ in Asistencia.ESTADOS:
+            self.assertIn('name="estado_%s" value="%s"' % (self.matricula_ana.id, valor), html)
+
+
+class ConfirmacionClaseTests(TestCase):
+    """La clase no se da por dictada hasta que la confirman los estudiantes.
+
+    Quien registra la clase es parte interesada, así que el registro por sí solo
+    no prueba nada. El número que hace falta depende del tamaño del grupo: tres
+    en un grupo normal, y uno solo donde hay uno o dos estudiantes, porque un
+    requisito que el grupo no puede alcanzar nunca no verifica nada.
+    """
+
+    def setUp(self):
+        self.periodo = Periodo.objects.create(
+            nombre="2026-1", fecha_inicio=date(2026, 1, 15), fecha_fin=date(2026, 6, 15),
+            activo=True, matriculas_abiertas=True,
+        )
+        area = Area.objects.create(nombre="Música")
+        self.profesor = self.crear_perfil("profe", "Profe Díaz", rol="profesor")
+        self.violin = Promotoria.objects.create(nombre="Violín", area=area, profesor=self.profesor)
+        self.grupo = Grupo.objects.create(
+            promotoria=self.violin, nivel="basico", horario="Lunes 4pm",
+            salon="A1", cupo_maximo=10,
+        )
+
+    # -- utilidades ---------------------------------------------------------
+
+    def crear_perfil(self, username, nombre, rol):
+        usuario = User.objects.create_user(username=username, password="x")
+        return Perfil.objects.create(
+            usuario=usuario, rol=rol, nombre_completo=nombre,
+            fecha_nacimiento=date(1990, 1, 1), telefono="3000000000",
+        )
+
+    def inscribir(self, username, grupo=None):
+        """Un estudiante nuevo, ya matriculado y repartido al grupo."""
+        perfil = self.crear_perfil(username, f"Estudiante {username}", rol="estudiante")
+        DatosEstudiante.objects.create(perfil=perfil, documento_identidad=username)
+        matricula = Matricula(
+            estudiante=perfil, promotoria=self.violin, periodo=self.periodo,
+            estado="activa", grupo=self.grupo if grupo is None else grupo,
+        )
+        matricula.full_clean()
+        matricula.save()
+        return perfil
+
+    def abrir_clase(self):
+        self.client.force_login(self.profesor.usuario)
+        self.client.post(reverse("panel_clase_nueva", args=[self.grupo.id]))
+        return Clase.objects.latest("id")
+
+    def confirmar(self, perfil, clase):
+        self.client.force_login(perfil.usuario)
+        return self.client.post(reverse("confirmar_clase", args=[clase.id]))
+
+    # -- cuántas hacen falta ------------------------------------------------
+
+    def test_un_grupo_normal_necesita_tres(self):
+        for i in range(4):
+            self.inscribir(f"est{i}")
+
+        clase = self.abrir_clase()
+
+        self.assertEqual(clase.confirmaciones_requeridas, 3)
+
+    def test_un_grupo_de_dos_se_conforma_con_una(self):
+        """Pedir tres a un grupo de dos sería pedir algo imposible."""
+        self.inscribir("uno")
+        self.inscribir("dos")
+
+        clase = self.abrir_clase()
+
+        self.assertEqual(clase.confirmaciones_requeridas, 1)
+
+    def test_un_grupo_de_uno_tambien_se_conforma_con_una(self):
+        self.inscribir("uno")
+
+        clase = self.abrir_clase()
+
+        self.assertEqual(clase.confirmaciones_requeridas, 1)
+
+    def test_justo_tres_estudiantes_ya_exigen_las_tres(self):
+        """El límite del grupo pequeño está en dos, no en tres."""
+        for i in range(3):
+            self.inscribir(f"est{i}")
+
+        clase = self.abrir_clase()
+
+        self.assertEqual(clase.confirmaciones_requeridas, 3)
+
+    def test_el_requisito_no_se_recalcula_cuando_entra_gente_nueva(self):
+        """Si se recalculara, una clase ya verificada volvería a quedar en falta."""
+        uno = self.inscribir("uno")
+        clase = self.abrir_clase()
+        self.confirmar(uno, clase)
+
+        for i in range(4):
+            self.inscribir(f"nuevo{i}")
+
+        clase.refresh_from_db()
+        self.assertEqual(clase.confirmaciones_requeridas, 1)
+        self.assertTrue(clase.esta_confirmada())
+
+    # -- confirmar ----------------------------------------------------------
+
+    def test_con_las_confirmaciones_completas_la_clase_queda_verificada(self):
+        estudiantes = [self.inscribir(f"est{i}") for i in range(4)]
+        clase = self.abrir_clase()
+
+        for estudiante in estudiantes[:2]:
+            self.confirmar(estudiante, clase)
+        a_medias = clase.esta_confirmada()
+        self.confirmar(estudiantes[2], clase)
+
+        self.assertFalse(a_medias)
+        self.assertTrue(clase.esta_confirmada())
+
+    def test_el_mismo_estudiante_no_confirma_dos_veces(self):
+        """Dos pulsaciones del mismo botón no pueden valer por dos personas."""
+        estudiantes = [self.inscribir(f"est{i}") for i in range(4)]
+        clase = self.abrir_clase()
+
+        self.confirmar(estudiantes[0], clase)
+        self.confirmar(estudiantes[0], clase)
+
+        self.assertEqual(clase.confirmaciones.count(), 1)
+        self.assertFalse(clase.esta_confirmada())
+
+    def test_quien_no_es_del_grupo_no_puede_confirmar(self):
+        self.inscribir("uno")
+        otro_grupo = Grupo.objects.create(
+            promotoria=self.violin, nivel="avanzado", horario="Jueves 6pm",
+            salon="B2", cupo_maximo=10,
+        )
+        ajeno = self.inscribir("ajeno", grupo=otro_grupo)
+        clase = self.abrir_clase()
+
+        self.confirmar(ajeno, clase)
+
+        self.assertFalse(clase.confirmaciones.exists())
+
+    def test_no_se_confirma_una_clase_anterior_a_la_propia_matricula(self):
+        """Quien acaba de entrar al grupo no estuvo en las clases de antes."""
+        self.inscribir("uno")
+        clase = self.abrir_clase()
+        recien_llegado = self.inscribir("nuevo")
+        Matricula.objects.filter(estudiante=recien_llegado).update(
+            fecha=timezone.now() + timedelta(minutes=5)
+        )
+
+        self.confirmar(recien_llegado, clase)
+
+        self.assertFalse(clase.confirmaciones.exists())
+
+    def test_se_puede_quitar_la_propia_confirmacion(self):
+        uno = self.inscribir("uno")
+        clase = self.abrir_clase()
+        self.confirmar(uno, clase)
+
+        self.client.post(reverse("retirar_confirmacion_clase", args=[clase.id]))
+
+        self.assertFalse(clase.confirmaciones.exists())
+        self.assertFalse(clase.esta_confirmada())
+
+    def test_quitar_la_confirmacion_solo_borra_la_propia(self):
+        estudiantes = [self.inscribir(f"est{i}") for i in range(4)]
+        clase = self.abrir_clase()
+        for estudiante in estudiantes[:3]:
+            self.confirmar(estudiante, clase)
+
+        self.client.force_login(estudiantes[0].usuario)
+        self.client.post(reverse("retirar_confirmacion_clase", args=[clase.id]))
+
+        self.assertEqual(clase.confirmaciones.count(), 2)
+
+    # -- lo que ve el estudiante --------------------------------------------
+
+    def test_la_pantalla_del_estudiante_lista_las_clases_de_sus_grupos(self):
+        uno = self.inscribir("uno")
+        otro_grupo = Grupo.objects.create(
+            promotoria=self.violin, nivel="avanzado", horario="Jueves 6pm",
+            salon="B2", cupo_maximo=10,
+        )
+        ajeno = self.inscribir("ajeno", grupo=otro_grupo)
+        clase = self.abrir_clase()
+
+        self.client.force_login(uno.usuario)
+        mias = self.client.get(reverse("mis_clases")).context["filas"]
+        self.client.force_login(ajeno.usuario)
+        ajenas = self.client.get(reverse("mis_clases")).context["filas"]
+
+        self.assertEqual([f["clase"].id for f in mias], [clase.id])
+        self.assertEqual(ajenas, [])
+
+    def test_la_pantalla_del_estudiante_no_deja_escapar_sintaxis_de_plantilla(self):
+        uno = self.inscribir("uno")
+        self.abrir_clase()
+
+        self.client.force_login(uno.usuario)
+        html = self.client.get(reverse("mis_clases")).content.decode()
+
+        for resto in ("{#", "#}", "{%", "%}", "{{", "}}"):
+            self.assertNotIn(resto, html)
+
+    def test_el_estudiante_ve_el_aviso_en_la_pantalla_de_inicio(self):
+        """Una verificación escondida detrás de un enlace del menú no la hace nadie."""
+        uno = self.inscribir("uno")
+        clase = self.abrir_clase()
+
+        self.client.force_login(uno.usuario)
+        antes = self.client.get(reverse("promotorias_disponibles"))
+        self.confirmar(uno, clase)
+        despues = self.client.get(reverse("promotorias_disponibles"))
+
+        self.assertEqual(antes.context["clases_por_confirmar"], 1)
+        self.assertEqual(despues.context["clases_por_confirmar"], 0)
+
+    def test_el_profesor_ve_cuantas_confirmaciones_lleva_su_clase(self):
+        """Un número, no una lista de nombres: ver la vista `clase_asistencia`."""
+        estudiantes = [self.inscribir(f"est{i}") for i in range(4)]
+        clase = self.abrir_clase()
+        self.confirmar(estudiantes[0], clase)
+
+        self.client.force_login(self.profesor.usuario)
+        respuesta = self.client.get(reverse("clase_asistencia", args=[clase.id]))
+
+        self.assertEqual(respuesta.context["confirmaciones"], 1)
+        self.assertEqual(respuesta.context["requeridas"], 3)
+        self.assertFalse(respuesta.context["verificada"])
+
+    # -- el plazo de 48 horas -----------------------------------------------
+
+    def atrasar(self, clase, horas):
+        """Mueve la clase al pasado, y con ella las matrículas de sus estudiantes.
+
+        Las dos cosas van juntas a propósito: en la vida real la matrícula es
+        anterior a la clase, y `clases_por_confirmar` descarta las clases
+        previas a la matrícula de quien mira. Mover solo la clase simularía un
+        grupo entero que se inscribió después de la sesión.
+
+        Las dos fechas son `auto_now_add`, así que se escriben con `update`.
+        """
+        cuando = timezone.now() - timedelta(hours=horas)
+        Clase.objects.filter(pk=clase.pk).update(fecha_hora=cuando)
+        Matricula.objects.filter(grupo=clase.grupo).update(
+            fecha=cuando - timedelta(hours=1)
+        )
+        clase.refresh_from_db()
+        return clase
+
+    def test_dentro_del_plazo_se_confirma(self):
+        uno = self.inscribir("uno")
+        clase = self.atrasar(self.abrir_clase(), horas=47)
+
+        self.confirmar(uno, clase)
+
+        self.assertTrue(clase.esta_confirmada())
+
+    def test_pasadas_las_48_horas_ya_no_se_confirma(self):
+        uno = self.inscribir("uno")
+        clase = self.atrasar(self.abrir_clase(), horas=49)
+
+        self.confirmar(uno, clase)
+
+        self.assertFalse(clase.confirmaciones.exists())
+        self.assertFalse(clase.esta_confirmada())
+
+    def test_lo_que_venció_sin_confirmar_queda_sin_verificar_para_siempre(self):
+        """No es "todavía faltan": es un desenlace que ya no va a cambiar."""
+        self.inscribir("uno")
+        clase = self.atrasar(self.abrir_clase(), horas=49)
+
+        self.assertTrue(clase.verificacion_vencida())
+        self.assertFalse(clase.confirmacion_abierta())
+
+    def test_lo_confirmado_a_tiempo_sigue_verificado_despues_del_plazo(self):
+        uno = self.inscribir("uno")
+        clase = self.abrir_clase()
+        self.confirmar(uno, clase)
+
+        self.atrasar(clase, horas=72)
+
+        self.assertTrue(clase.esta_confirmada())
+        self.assertFalse(clase.verificacion_vencida())
+
+    def test_tampoco_se_retira_la_confirmacion_fuera_de_plazo(self):
+        """Si no, una clase verificada podría dejar de estarlo semanas después."""
+        uno = self.inscribir("uno")
+        clase = self.abrir_clase()
+        self.confirmar(uno, clase)
+        self.atrasar(clase, horas=49)
+
+        self.client.force_login(uno.usuario)
+        self.client.post(reverse("retirar_confirmacion_clase", args=[clase.id]))
+
+        self.assertEqual(clase.confirmaciones.count(), 1)
+
+    def test_el_plazo_se_comprueba_en_el_servidor_no_solo_escondiendo_el_boton(self):
+        """Una pestaña abierta desde antes envía la petición igual, y a destiempo."""
+        uno = self.inscribir("uno")
+        clase = self.atrasar(self.abrir_clase(), horas=49)
+
+        self.client.force_login(uno.usuario)
+        respuesta = self.client.post(reverse("confirmar_clase", args=[clase.id]), follow=True)
+
+        self.assertFalse(clase.confirmaciones.exists())
+        self.assertContains(respuesta, "plazo")
+
+    def test_la_clase_vencida_sigue_en_la_lista_pero_sin_boton(self):
+        uno = self.inscribir("uno")
+        clase = self.atrasar(self.abrir_clase(), horas=49)
+
+        self.client.force_login(uno.usuario)
+        respuesta = self.client.get(reverse("mis_clases"))
+        html = respuesta.content.decode()
+
+        [fila] = respuesta.context["filas"]
+        self.assertEqual(fila["clase"].id, clase.id)
+        self.assertFalse(fila["abierta"])
+        self.assertTrue(fila["vencida"])
+        self.assertNotIn(reverse("confirmar_clase", args=[clase.id]), html)
+        self.assertIn("Plazo cerrado", html)
+
+    def test_el_aviso_de_inicio_no_cuenta_las_que_ya_vencieron(self):
+        """Insistir en algo que ya no se puede hacer solo es ruido."""
+        uno = self.inscribir("uno")
+        self.atrasar(self.abrir_clase(), horas=49)
+
+        self.client.force_login(uno.usuario)
+        respuesta = self.client.get(reverse("promotorias_disponibles"))
+
+        self.assertEqual(respuesta.context["clases_por_confirmar"], 0)

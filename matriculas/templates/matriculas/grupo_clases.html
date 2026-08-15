@@ -1,0 +1,104 @@
+{% extends "matriculas/base.html" %}
+{% load matriculas_extras %}
+
+{% block title %}Clases — {{ grupo }}{% endblock %}
+
+{% block content %}
+<p class="migas">
+  <a href="{% url 'panel' %}">Panel</a><span class="migas-sep">/</span>
+  <span class="migas-actual">{{ grupo.promotoria.nombre }} · {{ grupo.get_nivel_display }}</span>
+</p>
+
+<h2>Clases dictadas</h2>
+<p class="campo-info">
+  <span class="tag-dot {{ grupo.promotoria.area|tag_color }}"></span>{{ grupo.promotoria.nombre }} ·
+  {{ grupo.get_nivel_display }} · {{ grupo.horario }} · Salón {{ grupo.salon }}
+  {% if periodo %} · {{ periodo.nombre }}{% endif %}
+</p>
+
+{% if not periodo %}
+  <p class="vacio">No hay un periodo en curso, así que todavía no hay clases que mostrar.</p>
+{% else %}
+  <form action="{% url 'panel_clase_nueva' grupo.id %}" method="post" style="margin-bottom:1.4rem;">
+    {% csrf_token %}
+    <button type="submit" class="btn">Iniciar clase</button>
+  </form>
+
+  <h4>Sesiones registradas{% if clases %} ({{ clases|length }}){% endif %}</h4>
+  {% if not clases %}
+    <p class="vacio">Todavía no se ha registrado ninguna clase de este grupo en {{ periodo.nombre }}.</p>
+  {% else %}
+  <table>
+    <thead>
+      <tr>
+        <th>Día</th><th class="num">Hora</th><th>Verificación</th><th class="num">Asistió</th>
+        <th class="num">Faltó</th><th class="num">Con excusa</th><th class="num">Sin marcar</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in clases %}
+      <tr>
+        <td>{{ c.clase.fecha_hora|date:"D j \d\e F" }}</td>
+        <td class="num">{{ c.clase.fecha_hora|time:"H:i" }}</td>
+        <td>
+          {% if c.verificada %}
+            <span class="estado estado-activa">Verificada</span>
+          {% elif c.vencida %}
+            {# El plazo se acabó sin reunir las confirmaciones: ya no va a cambiar. #}
+            <span class="estado estado-retirada">Sin verificar</span>
+          {% elif c.requeridas %}
+            <span class="estado estado-pendiente">{{ c.confirmaciones }} de {{ c.requeridas }}</span>
+          {% else %}
+            {# Grupo sin nadie inscrito el día de la clase: no hay quién confirme. #}
+            <span class="vacio">Sin quién confirme</span>
+          {% endif %}
+        </td>
+        <td class="num">{{ c.asistio }}</td>
+        <td class="num">{{ c.falto }}</td>
+        <td class="num">{{ c.excusa }}</td>
+        <td class="num">{% if c.sin_marcar %}{{ c.sin_marcar }}{% else %}<span class="vacio">—</span>{% endif %}</td>
+        <td><a href="{% url 'clase_asistencia' c.clase.id %}">Abrir lista</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <h4>Por estudiante</h4>
+  {% if not filas %}
+    <p class="vacio">Este grupo no tiene estudiantes inscritos.</p>
+  {% else %}
+  <table>
+    <thead>
+      <tr>
+        <th></th><th>Nombre</th><th class="num">Asistió</th><th class="num">Faltó</th>
+        <th class="num">Con excusa</th><th class="num">Asistencia</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in filas %}
+      <tr>
+        <td>{% if f.matricula.estudiante.foto_perfil %}<img class="foto-mini" src="{% url 'ver_foto' f.matricula.estudiante.id %}" alt="">{% endif %}</td>
+        <td>
+          {% if f.matricula.estudiante|ficha_visible_para:user.perfil %}
+            <a href="{% url 'detalle_usuario' f.matricula.estudiante.id %}">{{ f.matricula.estudiante.nombre_completo }}</a>
+          {% else %}{{ f.matricula.estudiante.nombre_completo }}{% endif %}
+        </td>
+        <td class="num">{{ f.asistio }}</td>
+        <td class="num">{{ f.falto }}</td>
+        <td class="num">{{ f.excusa }}</td>
+        {% comment %}
+          El porcentaje va sobre las clases DICTADAS, no sobre las veces que a
+          esa persona la marcaron (ver resumen_asistencia_grupo). Sin clases
+          todavía no hay porcentaje que dar, y ahí va una raya, no un cero.
+        {% endcomment %}
+        <td class="num">{% if f.porcentaje is None %}<span class="vacio">—</span>{% else %}{{ f.porcentaje }}%{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+{% endif %}
+
+<p style="margin-top:1.5rem;"><a class="volver" href="{% url 'panel' %}">← Volver al panel</a></p>
+{% endblock %}
