@@ -362,6 +362,15 @@ class Command(BaseCommand):
                 )
                 matricula.full_clean()
                 matricula.save()
+                # La fecha es auto_now_add, así que sin esto toda la simulación
+                # queda matriculada HOY — y entonces las clases sembradas semanas
+                # atrás resultan anteriores a la matrícula de sus propios
+                # estudiantes, que es justo lo que `clases_por_confirmar`
+                # descarta: el grupo tenía cinco clases y en "Mis clases" no
+                # aparecía ninguna. Se retrasan más que la clase más antigua.
+                Matricula.objects.filter(pk=matricula.pk).update(
+                    fecha=timezone.now() - timedelta(days=self.azar.randint(40, 60))
+                )
 
                 # Solo se reparte en grupo lo que está inscrito, igual que en la
                 # aplicación: una pendiente no tiene grupo todavía.
@@ -477,8 +486,12 @@ class Command(BaseCommand):
             if not inscritos:
                 continue
 
+            # Horas hacia atrás. Ninguna sesión se va más allá de lo que se
+            # retrasan las matrículas (ver `_sembrar_matriculas`): una clase
+            # anterior a la matrícula de sus propios estudiantes no la puede
+            # confirmar nadie.
             if escenario == "abierta":
-                sesiones = [2]                      # horas atrás: dentro del plazo
+                sesiones = [2]                      # dentro del plazo de 48 h
             elif escenario == "vencida":
                 sesiones = [24 * 5]
             else:

@@ -29,7 +29,8 @@ from .models import (
     RANURA_MAXIMA_ABSOLUTA,
     Acudiente, Area, Asistencia, Clase, ConfiguracionInstitucion, CupoPromotoria,
     DatosEstudiante, EncuestaDemografica, Grupo,
-    Matricula, Perfil, Periodo, Promotoria, historial_por_periodo,
+    Matricula, Perfil, Periodo, Promotoria, clases_por_confirmar,
+    historial_por_periodo,
     matriculas_renovables, resumen_asistencia_grupo,
     resumen_trayectoria,
 )
@@ -2622,6 +2623,33 @@ class ComandoSimularTests(TestCase):
         self.assertTrue(any(
             c.confirmacion_abierta() and not c.esta_confirmada() for c in clases
         ))
+
+    def test_los_estudiantes_pueden_confirmar_las_clases_de_su_grupo(self):
+        """La matrícula tiene que quedar ANTES que las clases de su grupo.
+
+        `Matricula.fecha` es auto_now_add, así que sin corregirla toda la
+        simulación queda matriculada hoy y las clases sembradas semanas atrás
+        resultan anteriores a la matrícula de sus propios estudiantes — que es
+        justo lo que `clases_por_confirmar` descarta. El grupo tenía cinco
+        clases y en "Mis clases" no aparecía ninguna: los datos se veían bien en
+        el panel del profesor y la pantalla del estudiante salía vacía.
+        """
+        self.simular(estudiantes=40)
+
+        conclases = {c.grupo_id for c in Clase.objects.all()}
+        self.assertTrue(conclases, "la simulación no sembró ninguna clase")
+        vistas = 0
+        for matricula in Matricula.objects.filter(
+            grupo_id__in=conclases, periodo=self.periodo,
+            estado__in=Matricula.ESTADOS_INSCRITO,
+        ).select_related("estudiante"):
+            vistas += len(clases_por_confirmar(matricula.estudiante, self.periodo))
+
+        self.assertGreater(
+            vistas, 0,
+            "ningún estudiante ve las clases de su grupo: sus matrículas quedaron "
+            "fechadas después de las clases",
+        )
 
     def test_los_menores_quedan_con_acudiente(self):
         """Sin acudiente, `DatosEstudiante` no valida: sembrarlos así dejaría
