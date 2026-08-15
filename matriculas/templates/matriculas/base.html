@@ -1130,7 +1130,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
   <nav>
     {% if user.is_authenticated %}
       {% if user.perfil.rol == "estudiante" %}
-        <a href="{% url 'promotorias_disponibles' %}">Promotorías disponibles</a>
+        {% if configuracion.promotorias_visibles_para_estudiantes %}<a href="{% url 'promotorias_disponibles' %}">Promotorías disponibles</a>{% endif %}
         <a href="{% url 'mis_matriculas' %}">Mis matrículas</a>
         <a href="{% url 'mis_clases' %}">Mis clases</a>
         <a href="{% url 'mis_companeros' %}">Mis compañeros</a>

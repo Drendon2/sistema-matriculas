@@ -165,6 +165,17 @@ class ConfiguracionInstitucion(models.Model):
         ),
     )
 
+    promotorias_visibles_para_estudiantes = models.BooleanField(
+        default=True,
+        verbose_name="los estudiantes ven el catálogo de promotorías",
+        help_text=(
+            "Con esto apagado, el estudiante no ve la pantalla para matricularse por su "
+            "cuenta y solo consulta lo que ya tiene. Sirve para las instituciones que "
+            "inscriben en ventanilla: el personal matricula desde Gestión y la pantalla "
+            "pública solo confundiría. No afecta a las matrículas ya hechas."
+        ),
+    )
+
     class Meta:
         verbose_name = "Configuración de la institución"
         verbose_name_plural = "Configuración de la institución"

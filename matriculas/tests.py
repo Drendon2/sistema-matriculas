@@ -3876,3 +3876,69 @@ class DocumentosRequeridosTests(TestCase):
         respuesta = self.client.get(reverse("panel"))
 
         self.assertNotContains(respuesta, 'class="estado estado-papeles"')
+
+
+class CatalogoOpcionalTests(TestCase):
+    """La institución decide si el estudiante puede matricularse por su cuenta.
+
+    Hay entidades que inscriben en ventanilla: ahí la pantalla pública no ayuda,
+    confunde. Apagarla no toca las matrículas que ya existen.
+    """
+
+    def setUp(self):
+        self.periodo = Periodo.objects.create(
+            nombre="2026-2", fecha_inicio=date(2026, 7, 1), fecha_fin=date(2026, 12, 15),
+            activo=True, matriculas_abiertas=True,
+        )
+        area = Area.objects.create(nombre="Música")
+        self.violin = Promotoria.objects.create(nombre="Violín", area=area)
+        usuario = User.objects.create_user(username="ana", password="x")
+        self.ana = Perfil.objects.create(
+            usuario=usuario, rol="estudiante", nombre_completo="Ana Ruiz",
+            fecha_nacimiento=date(1995, 3, 4), telefono="3000000000")
+        DatosEstudiante.objects.create(perfil=self.ana, documento_identidad="111")
+        self.client.force_login(usuario)
+
+    def apagar(self):
+        configuracion = ConfiguracionInstitucion.actual()
+        configuracion.promotorias_visibles_para_estudiantes = False
+        configuracion.save()
+
+    def test_encendido_el_estudiante_entra_al_catalogo(self):
+        respuesta = self.client.get(reverse("promotorias_disponibles"))
+
+        self.assertEqual(respuesta.status_code, 200)
+
+    def test_apagado_la_pantalla_se_cierra(self):
+        """El corte va en la vista y no solo en el enlace del menú: esconder el
+        enlace no cierra la URL, y quien la tenga guardada seguiría entrando."""
+        self.apagar()
+
+        respuesta = self.client.get(reverse("promotorias_disponibles"))
+
+        self.assertRedirects(respuesta, reverse("mis_matriculas"))
+
+    def test_apagado_desaparece_el_enlace_del_menu(self):
+        self.apagar()
+
+        respuesta = self.client.get(reverse("mis_matriculas"))
+
+        self.assertNotContains(respuesta, "Promotorías disponibles")
+
+    def test_apagado_no_toca_las_matriculas_que_ya_existen(self):
+        matricula = Matricula(
+            estudiante=self.ana, promotoria=self.violin, periodo=self.periodo,
+            estado="activa")
+        matricula.full_clean()
+        matricula.save()
+        self.apagar()
+
+        respuesta = self.client.get(reverse("mis_matriculas"))
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertContains(respuesta, "Violín")
+
+    def test_por_defecto_viene_encendido(self):
+        """Una instalación nueva no debería tener que ir a activarlo."""
+        self.assertTrue(
+            ConfiguracionInstitucion.actual().promotorias_visibles_para_estudiantes)

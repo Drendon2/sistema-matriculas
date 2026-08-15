@@ -74,6 +74,15 @@
       <p class="config-ayuda">{{ form.limite_promotorias_por_periodo.help_text }}</p>
     </div>
 
+    <div class="config-campo">
+      <label class="config-interruptor">
+        {{ form.promotorias_visibles_para_estudiantes }}
+        <span class="config-etiqueta">{{ form.promotorias_visibles_para_estudiantes.label }}</span>
+      </label>
+      {{ form.promotorias_visibles_para_estudiantes.errors }}
+      <p class="config-ayuda">{{ form.promotorias_visibles_para_estudiantes.help_text }}</p>
+    </div>
+
     </fieldset>
 
     <button type="submit" class="btn">Guardar</button>

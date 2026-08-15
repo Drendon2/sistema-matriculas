@@ -218,7 +218,20 @@ def promotorias_disponibles(request):
 
     El estudiante NO elige grupo/horario aquí: eso lo reparte después el
     profesor entre los ya matriculados.
+
+    La institución puede apagar esta pantalla (hay entidades que inscriben en
+    ventanilla y matriculan desde Gestión). El corte va aquí y no solo en el
+    enlace del menú: esconder el enlace no cierra la URL, y quien la tenga
+    guardada seguiría matriculándose solo.
     """
+    if not ConfiguracionInstitucion.actual().promotorias_visibles_para_estudiantes:
+        messages.error(
+            request,
+            "La inscripción por tu cuenta no está habilitada. Acércate a la "
+            "institución para que te matriculen.",
+        )
+        return redirect("mis_matriculas")
+
     perfil = request.perfil
     periodo = Periodo.en_curso()
     abiertas = periodo is not None and periodo.matriculas_abiertas

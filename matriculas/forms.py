@@ -42,7 +42,7 @@ class ConfiguracionInstitucionForm(forms.ModelForm):
         model = ConfiguracionInstitucion
         fields = [
             "nombre_institucion", "logo", "color_acento",
-            "limite_promotorias_por_periodo",
+            "limite_promotorias_por_periodo", "promotorias_visibles_para_estudiantes",
         ]
         widgets = {
             "color_acento": forms.TextInput(attrs={"type": "color"}),
