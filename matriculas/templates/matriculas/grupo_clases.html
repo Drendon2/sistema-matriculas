@@ -19,10 +19,17 @@
 {% if not periodo %}
   <p class="vacio">No hay un periodo en curso, así que todavía no hay clases que mostrar.</p>
 {% else %}
+  {% if puede_marcar %}
   <form action="{% url 'panel_clase_nueva' grupo.id %}" method="post" style="margin-bottom:1.4rem;">
     {% csrf_token %}
     <button type="submit" class="btn">Iniciar clase</button>
   </form>
+  {% else %}
+  <p class="aviso">
+    Registrar clases y pasar lista es del profesor que dicta la promotoría. Aquí ves
+    el registro, pero no lo modificas.
+  </p>
+  {% endif %}
 
   <h4>Sesiones registradas{% if clases %} ({{ clases|length }}){% endif %}</h4>
   {% if not clases %}

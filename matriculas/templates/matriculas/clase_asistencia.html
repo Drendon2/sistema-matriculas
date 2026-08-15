@@ -53,6 +53,19 @@
     <p class="campo-info">Falta{{ sin_pasar|pluralize:"n" }} {{ sin_pasar }} de {{ estudiantes|length }} por marcar.</p>
   {% endif %}
 
+  {% if not puede_marcar %}
+    <p class="aviso">
+      Pasar lista es del profesor que dicta la promotoría: aquí ves lo que marcó, sin
+      poder cambiarlo. Un registro que puede reescribir alguien que no dio la clase
+      deja de ser evidencia de lo que pasó.
+    </p>
+  {% endif %}
+
+  {% comment %}
+    La misma hoja en los dos modos, y no dos pantallas distintas: el renglón,
+    el orden y el vocabulario de forma son idénticos: lo único que cambia es si
+    la marca es una opción que se pulsa o un marcador ya puesto.
+  {% endcomment %}
   <form method="post" class="card asistencia-lista" id="form-asistencia">
     {% csrf_token %}
     {% for e in estudiantes %}
@@ -65,20 +78,28 @@
         {% if e.cancelacion %}<span class="estado estado-cancelacion_solicitada">Pidió cancelar</span>{% endif %}
       </span>
       <span class="asistencia-opciones">
-        {% for valor, etiqueta in estados %}
-        <label class="asistencia-opcion asistencia-opcion-{{ valor }}">
-          <input type="radio" name="estado_{{ e.matricula.id }}" value="{{ valor }}"
-                 {% if e.estado == valor %}checked{% endif %}>{{ etiqueta }}
-        </label>
-        {% endfor %}
+        {% if puede_marcar %}
+          {% for valor, etiqueta in estados %}
+          <label class="asistencia-opcion asistencia-opcion-{{ valor }}">
+            <input type="radio" name="estado_{{ e.matricula.id }}" value="{{ valor }}"
+                   {% if e.estado == valor %}checked{% endif %}>{{ etiqueta }}
+          </label>
+          {% endfor %}
+        {% elif e.estado %}
+          <span class="estado {{ e.marca }}">{{ e.marca_texto }}</span>
+        {% else %}
+          <span class="vacio">Sin marcar</span>
+        {% endif %}
       </span>
     </div>
     {% endfor %}
 
+    {% if puede_marcar %}
     <div class="asistencia-pie">
       <button type="submit" class="btn">Guardar asistencia</button>
       <button type="button" class="btn btn-secundario btn-sm" id="marcar-todos">Marcar todos como asistió</button>
     </div>
+    {% endif %}
   </form>
 {% endif %}
 

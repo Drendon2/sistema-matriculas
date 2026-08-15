@@ -298,6 +298,8 @@ La cara del estudiante (`.clase-fila`, "Mis clases") repite ese mismo renglón �
 
 Vencido el plazo de confirmación, lo que no llegó al número pasa a **«Sin verificar» con el tratamiento de "retirada"** (borde y texto rojo, tachado). El tachado es la parte que trabaja: separa un desenlace cerrado —esto ya no va a cambiar— de un «1 de 3» punteado, que sigue esperando respuesta. Los dos dicen que faltan confirmaciones y significan lo contrario, así que no pueden compartir forma. Donde no queda botón porque el plazo cerró, el renglón lo dice con un rótulo en monoespaciada («Plazo cerrado»): un hueco vacío donde antes había una acción se lee como un fallo, no como una regla.
 
+Quien puede ver la hoja pero no escribirla (director y administrador, ver PRODUCT.md) recibe **la misma hoja**, no otra pantalla: mismo renglón, mismo orden, mismo vocabulario. Lo único que cambia es que la marca deja de ser una opción que se pulsa y pasa a ser un marcador `.estado` ya puesto — sólido para *asistió*, tachado para *faltó*, punteado para la *excusa*, las mismas tres formas. Sin esa correspondencia habría que inventar un segundo lenguaje para decir exactamente lo mismo en modo lectura.
+
 **Sin marcar no tiene forma propia**, y es deliberado: una opción vacía significa que a esa persona nadie la pasó, y la pantalla lo dice con una cifra ("Falta 1 de 12 por marcar"), no con un cuarto marcador que competiría con los tres reales.
 
 ### Navigation

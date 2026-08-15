@@ -100,6 +100,7 @@
     </h4>
     {% if item.puede_gestionar %}
     <span class="acciones">
+      {% if item.puede_marcar %}
       <form action="{% url 'panel_clase_nueva' g.grupo.id %}" method="post" style="display:inline;">
         {% csrf_token %}
         {% if g.clase_hoy %}
@@ -108,6 +109,7 @@
           <button type="submit" class="btn btn-sm">Iniciar clase</button>
         {% endif %}
       </form>
+      {% endif %}
       <a href="{% url 'grupo_clases' g.grupo.id %}">clases</a>
       <a href="{% url 'panel_grupo_editar' g.grupo.id %}">editar</a>
       <form action="{% url 'panel_grupo_eliminar' g.grupo.id %}" method="post" style="display:inline;">

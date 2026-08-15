@@ -2233,3 +2233,151 @@ class ConfirmacionClaseTests(TestCase):
         respuesta = self.client.get(reverse("promotorias_disponibles"))
 
         self.assertEqual(respuesta.context["clases_por_confirmar"], 0)
+
+
+class AsistenciaSoloDelProfesorTests(TestCase):
+    """La asistencia la ESCRIBE solo el profesor que dicta; el resto la LEE.
+
+    Es una regla más estrecha que la del panel: crear grupos, fijar cupos o
+    confirmar matrículas son tareas de dirección, pero registrar una clase y
+    pasar lista son actos de quien estuvo en el salón. Director y administrador
+    siguen viendo todo —la supervisión es para lo que existe este registro—, y
+    lo que no pueden es reescribirlo.
+    """
+
+    def setUp(self):
+        self.periodo = Periodo.objects.create(
+            nombre="2026-1", fecha_inicio=date(2026, 1, 15), fecha_fin=date(2026, 6, 15),
+            activo=True, matriculas_abiertas=True,
+        )
+        area = Area.objects.create(nombre="Música")
+        self.profesor = self.crear_perfil("profe", "Profe Díaz", "profesor")
+        self.director = self.crear_perfil("dire", "Directora", "director")
+        self.admin = self.crear_perfil("admin", "Administrador", "administrador")
+        self.violin = Promotoria.objects.create(nombre="Violín", area=area, profesor=self.profesor)
+        self.grupo = Grupo.objects.create(
+            promotoria=self.violin, nivel="basico", horario="Lunes 4pm",
+            salon="A1", cupo_maximo=10,
+        )
+        self.estudiante = self.crear_perfil("ana", "Ana Ruiz", "estudiante")
+        DatosEstudiante.objects.create(perfil=self.estudiante, documento_identidad="123")
+        self.matricula = Matricula(
+            estudiante=self.estudiante, promotoria=self.violin, periodo=self.periodo,
+            estado="activa", grupo=self.grupo,
+        )
+        self.matricula.full_clean()
+        self.matricula.save()
+
+    def crear_perfil(self, username, nombre, rol):
+        usuario = User.objects.create_user(username=username, password="x")
+        return Perfil.objects.create(
+            usuario=usuario, rol=rol, nombre_completo=nombre,
+            fecha_nacimiento=date(1990, 1, 1), telefono="3000000000",
+        )
+
+    def abrir_clase(self):
+        self.client.force_login(self.profesor.usuario)
+        self.client.post(reverse("panel_clase_nueva", args=[self.grupo.id]))
+        return Clase.objects.latest("id")
+
+    # -- escribir: solo el profesor -----------------------------------------
+
+    def test_el_director_no_puede_registrar_una_clase(self):
+        self.client.force_login(self.director.usuario)
+
+        self.client.post(reverse("panel_clase_nueva", args=[self.grupo.id]))
+
+        self.assertFalse(Clase.objects.exists())
+
+    def test_el_administrador_tampoco_puede_registrar_una_clase(self):
+        self.client.force_login(self.admin.usuario)
+
+        self.client.post(reverse("panel_clase_nueva", args=[self.grupo.id]))
+
+        self.assertFalse(Clase.objects.exists())
+
+    def test_el_director_no_puede_pasar_lista(self):
+        clase = self.abrir_clase()
+        self.client.force_login(self.director.usuario)
+
+        self.client.post(
+            reverse("clase_asistencia", args=[clase.id]),
+            {f"estado_{self.matricula.id}": "asistio"},
+        )
+
+        self.assertFalse(clase.asistencias.exists())
+
+    def test_el_director_tampoco_puede_reescribir_lo_ya_marcado(self):
+        """El caso que de verdad importa: cambiar la marca de otro."""
+        clase = self.abrir_clase()
+        self.client.post(
+            reverse("clase_asistencia", args=[clase.id]),
+            {f"estado_{self.matricula.id}": "falto"},
+        )
+        self.client.force_login(self.director.usuario)
+
+        self.client.post(
+            reverse("clase_asistencia", args=[clase.id]),
+            {f"estado_{self.matricula.id}": "asistio"},
+        )
+
+        self.assertEqual(clase.asistencias.get().estado, "falto")
+
+    def test_una_promotoria_sin_profesor_no_registra_clases(self):
+        """Consecuencia asumida de la regla: sin profesor no hay quién dé la clase."""
+        self.violin.profesor = None
+        self.violin.save()
+        self.client.force_login(self.director.usuario)
+
+        self.client.post(reverse("panel_clase_nueva", args=[self.grupo.id]))
+
+        self.assertFalse(Clase.objects.exists())
+
+    # -- leer: sigue abierto al panel ---------------------------------------
+
+    def test_el_director_sigue_viendo_la_lista_y_las_clases(self):
+        clase = self.abrir_clase()
+        self.client.force_login(self.director.usuario)
+
+        lista = self.client.get(reverse("clase_asistencia", args=[clase.id]))
+        clases = self.client.get(reverse("grupo_clases", args=[self.grupo.id]))
+
+        self.assertEqual(lista.status_code, 200)
+        self.assertEqual(clases.status_code, 200)
+        self.assertFalse(lista.context["puede_marcar"])
+        self.assertContains(lista, "Ana Ruiz")
+
+    def test_al_director_no_se_le_ofrecen_los_controles(self):
+        clase = self.abrir_clase()
+        self.client.post(
+            reverse("clase_asistencia", args=[clase.id]),
+            {f"estado_{self.matricula.id}": "excusa"},
+        )
+        self.client.force_login(self.director.usuario)
+
+        html = self.client.get(reverse("clase_asistencia", args=[clase.id])).content.decode()
+
+        self.assertNotIn(f'name="estado_{self.matricula.id}"', html)
+        self.assertNotIn("Guardar asistencia", html)
+        # Pero sí ve QUÉ se marcó, con el mismo vocabulario de forma.
+        self.assertIn("Faltó con excusa", html)
+
+    def test_al_profesor_si_se_le_ofrecen(self):
+        clase = self.abrir_clase()
+
+        respuesta = self.client.get(reverse("clase_asistencia", args=[clase.id]))
+
+        self.assertTrue(respuesta.context["puede_marcar"])
+        self.assertContains(respuesta, "Guardar asistencia")
+
+    def test_el_panel_solo_le_da_el_boton_al_profesor(self):
+        self.client.force_login(self.profesor.usuario)
+        del_profesor = self.client.get(reverse("panel")).content.decode()
+        self.client.force_login(self.director.usuario)
+        del_director = self.client.get(reverse("panel")).content.decode()
+
+        boton = reverse("panel_clase_nueva", args=[self.grupo.id])
+        self.assertIn(boton, del_profesor)
+        self.assertNotIn(boton, del_director)
+        # El enlace a las clases lo conservan los dos: leer no es escribir.
+        self.assertIn(reverse("grupo_clases", args=[self.grupo.id]), del_director)

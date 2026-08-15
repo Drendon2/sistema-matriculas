@@ -736,6 +736,26 @@ def _puede_gestionar_promotoria(perfil, promotoria):
     )
 
 
+def _dicta_la_promotoria(perfil, promotoria):
+    """¿Es esta persona EL profesor de la promotoría?
+
+    Es una regla más estrecha que `_puede_gestionar_promotoria`, y la diferencia
+    está donde tiene que estar: gestionar el catálogo —crear grupos, fijar
+    cupos, confirmar matrículas— es tarea de dirección, pero registrar una clase
+    y pasar lista son actos de quien estuvo en el salón.
+
+    Director y administrador siguen VIENDO todo lo de asistencia; lo que no
+    hacen es escribirlo. Un registro que puede reescribir alguien que no dio la
+    clase deja de ser evidencia de lo que pasó, y es justamente la evidencia lo
+    que la confirmación de los estudiantes está sosteniendo.
+
+    Consecuencia asumida: una promotoría SIN profesor asignado no puede
+    registrar clases hasta que se le asigne uno. Es correcto — sin profesor no
+    hay quien dé la clase — y el mensaje de error lo dice.
+    """
+    return perfil.rol == "profesor" and promotoria.profesor_id == perfil.id
+
+
 def _ficha_estudiante(matricula):
     est = matricula.estudiante
     datos_est = getattr(est, "datos_estudiante", None)
@@ -815,6 +835,9 @@ def panel(request):
             "sin_grupo": [_ficha_estudiante(m) for m in sin_grupo],
             "pendientes": [_ficha_estudiante(m) for m in pendientes],
             "puede_gestionar": _puede_gestionar_promotoria(perfil, promotoria),
+            # Más estrecho que lo anterior: el botón de clase es solo del
+            # profesor que la dicta (ver `_dicta_la_promotoria`).
+            "puede_marcar": _dicta_la_promotoria(perfil, promotoria),
             "cupo": promotoria.cupo_en(periodo),
             "ocupados": promotoria.ocupados_en(periodo),
         })
@@ -1037,8 +1060,27 @@ def panel_asignar_grupo(request, matricula_id):
 
 
 # ---------------------------------------------------------------------------
-# Clases dictadas y asistencia (profesor del grupo, director, administrador)
+# Clases dictadas y asistencia
+#
+# Lo LEE todo el panel (profesor de la promotoría, director y administrador);
+# lo ESCRIBE solo el profesor que la dicta. Ver `_dicta_la_promotoria`.
 # ---------------------------------------------------------------------------
+
+_SOLO_EL_PROFESOR = (
+    "Solo el profesor que dicta la promotoría puede registrar clases y pasar lista. "
+    "Si la promotoría no tiene profesor asignado, asígnale uno primero."
+)
+
+# Cómo se pinta una marca de asistencia cuando NO se puede editar (director o
+# administrador mirando). Reusa el vocabulario de forma de `.estado`, el mismo
+# que llevan las opciones marcables: sólida = vino, tachada = faltó, punteada =
+# avisó pero tampoco estuvo. Sin esto habría que inventar un segundo lenguaje
+# para decir lo mismo en modo lectura.
+MARCA_ASISTENCIA = {
+    "asistio": "estado-activa",
+    "falto": "estado-retirada",
+    "excusa": "estado-cancelacion_solicitada",
+}
 
 @requiere_rol(*ROLES_PANEL)
 def panel_clase_nueva(request, grupo_id):
@@ -1058,8 +1100,8 @@ def panel_clase_nueva(request, grupo_id):
         return redirect("panel")
 
     grupo = get_object_or_404(Grupo, pk=grupo_id)
-    if not _puede_gestionar_promotoria(request.perfil, grupo.promotoria):
-        messages.error(request, "No tienes acceso a esta promotoría.")
+    if not _dicta_la_promotoria(request.perfil, grupo.promotoria):
+        messages.error(request, _SOLO_EL_PROFESOR)
         return redirect("panel")
 
     periodo = Periodo.en_curso()
@@ -1099,6 +1141,10 @@ def clase_asistencia(request, clase_id):
 
     Dejar a alguien sin marcar es válido a propósito (ver `Asistencia`): la
     pantalla lo avisa, pero no bloquea el guardado.
+
+    La MARCA la pone solo el profesor que dicta la promotoría; director y
+    administrador ven la misma pantalla en solo lectura (ver
+    `_dicta_la_promotoria`).
     """
     clase = get_object_or_404(
         Clase.objects.select_related("grupo", "grupo__promotoria", "grupo__promotoria__area", "periodo"),
@@ -1108,9 +1154,16 @@ def clase_asistencia(request, clase_id):
         messages.error(request, "No tienes acceso a esta promotoría.")
         return redirect("panel")
 
+    puede_marcar = _dicta_la_promotoria(request.perfil, clase.grupo.promotoria)
     matriculas = list(clase.matriculas_a_pasar())
 
     if request.method == "POST":
+        # Se comprueba aquí y no solo escondiendo los controles: la petición
+        # llega igual si alguien la envía a mano.
+        if not puede_marcar:
+            messages.error(request, _SOLO_EL_PROFESOR)
+            return redirect("clase_asistencia", clase_id=clase.id)
+
         estados_validos = dict(Asistencia.ESTADOS)
         marcados = 0
         with transaction.atomic():
@@ -1138,17 +1191,22 @@ def clase_asistencia(request, clase_id):
         asistencia.matricula_id: asistencia.estado
         for asistencia in clase.asistencias.all()
     }
-    estudiantes = [
-        {
+    etiquetas = dict(Asistencia.ESTADOS)
+    estudiantes = []
+    for matricula in matriculas:
+        estado = ya_marcado.get(matricula.id, "")
+        estudiantes.append({
             "matricula": matricula,
             "perfil": matricula.estudiante,
-            "estado": ya_marcado.get(matricula.id, ""),
+            "estado": estado,
             # El profesor se entera de que está de salida, igual que en el panel:
             # la marca es informativa y no cambia que haya que pasarle lista.
             "cancelacion": matricula.cancelacion_pendiente,
-        }
-        for matricula in matriculas
-    ]
+            # Para quien mira sin poder editar: lo mismo, pero como marcador de
+            # estado en vez de opción marcable (ver MARCA_ASISTENCIA).
+            "marca": MARCA_ASISTENCIA.get(estado, ""),
+            "marca_texto": etiquetas.get(estado, ""),
+        })
 
     # Del lado del profesor se enseña CUÁNTAS confirmaciones lleva la clase,
     # nunca quién la confirmó. El número le dice lo que necesita saber —si la
@@ -1161,6 +1219,7 @@ def clase_asistencia(request, clase_id):
         "clase": clase,
         "estudiantes": estudiantes,
         "estados": Asistencia.ESTADOS,
+        "puede_marcar": puede_marcar,
         "sin_pasar": sum(1 for e in estudiantes if not e["estado"]),
         "confirmaciones": confirmaciones,
         "requeridas": clase.confirmaciones_requeridas,
@@ -1178,6 +1237,10 @@ def grupo_clases(request, grupo_id):
     asistencia sería un dato que solo se escribe. Sirve para las dos preguntas
     que se hacen de verdad —qué días hubo clase y quién está dejando de venir— y
     es el único camino para volver a una lista y corregirla.
+
+    La ve todo el panel, incluidos director y administrador: la supervisión es
+    justamente para lo que existe este registro. Lo que ellos no tienen es el
+    botón de abrir una clase (ver `_dicta_la_promotoria`).
     """
     grupo = get_object_or_404(
         Grupo.objects.select_related("promotoria", "promotoria__area"), pk=grupo_id
@@ -1194,6 +1257,7 @@ def grupo_clases(request, grupo_id):
         "periodo": periodo,
         "clases": clases,
         "filas": filas,
+        "puede_marcar": _dicta_la_promotoria(request.perfil, grupo.promotoria),
     })
 
 
